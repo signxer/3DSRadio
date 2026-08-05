@@ -20,29 +20,29 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # Update package database and install tools
           dkp-pacman -Sy --noconfirm 2>&1 | tail -3
           dkp-pacman -S --noconfirm \
             3ds-libcurl 3ds-mbedtls 3ds-libpng 3ds-libjpeg-turbo \
-            devkitpro-devtools python 2>&1 | tail -10 || true
+            python git cmake make gcc 2>&1 | tail -5 || true
 
-          # Fallback: download bannertool and makerom if not installed
+          # Build bannertool from source
           if ! command -v bannertool &>/dev/null; then
-            echo "Downloading bannertool..."
-            curl -sSL -o /usr/local/bin/bannertool \
-              "https://github.com/devkitPro/bannertool/releases/latest/download/bannertool-x86_64-linux-gnu" 2>/dev/null || \
-            curl -sSL -o /usr/local/bin/bannertool \
-              "https://github.com/devkitPro/bannertool/releases/download/v1.2.0/bannertool-x86_64-linux-gnu" 2>/dev/null || true
-            chmod +x /usr/local/bin/bannertool 2>/dev/null || true
+            echo "Building bannertool from source..."
+            git clone --depth 1 https://github.com/devkitPro/bannertool.git /tmp/bannertool
+            cd /tmp/bannertool && make -j$(nproc)
+            cp bannertool /usr/local/bin/
+            echo "bannertool built"
           fi
+
+          # Build makerom from source
           if ! command -v makerom &>/dev/null; then
-            echo "Downloading makerom..."
-            curl -sSL -o /usr/local/bin/makerom \
-              "https://github.com/devkitPro/makerom/releases/latest/download/makerom-x86_64-linux-gnu" 2>/dev/null || \
-            curl -sSL -o /usr/local/bin/makerom \
-              "https://github.com/devkitPro/makerom/releases/download/v0.18.4/makerom-x86_64-linux-gnu" 2>/dev/null || true
-            chmod +x /usr/local/bin/makerom 2>/dev/null || true
+            echo "Building makerom from source..."
+            git clone --depth 1 https://github.com/devkitPro/makerom.git /tmp/makerom
+            cd /tmp/makerom && make -j$(nproc)
+            cp makerom /usr/local/bin/
+            echo "makerom built"
           fi
+
           command -v bannertool && bannertool --version 2>&1 || echo "bannertool not available"
           command -v makerom && makerom -version 2>&1 || echo "makerom not available"
 
