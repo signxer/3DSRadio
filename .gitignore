@@ -1,0 +1,17 @@
+# Build artifacts
+build/
+*.3dsx
+*.elf
+*.smdh
+*.cia
+*.map
+
+# CA certificates
+romfs/cacert.pem
+
+# CIA assets
+romfs/banner.bnr
+romfs/icon.icn
+romfs/banner.png
+romfs/banner.wav
+romfs/icon.png

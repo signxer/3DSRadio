@@ -1,0 +1,40 @@
+# 3DSRadio CIA Template
+BasicInfo:
+  Title: $(APP_TITLE)
+  ProductCode: $(APP_PRODUCT_CODE)
+  UniqueId: $(APP_UNIQUE_ID)
+
+SystemInfo:
+  IsEnabled3D: false
+  LogicalMaxSaveDataCount: 1
+  LogicalSaveDataSize: 128 KB
+  Platform: T
+  ExtdataId: 0xdeadbeef
+  LocalCode: 1
+  FreeProductCode: false
+  Category: Application
+
+CciInfo:
+  IconSize: 48x48
+  BannerImage: 256x128
+  BannerSound: 100ms
+  Dependency:
+    - ac:n
+    - am:net
+    - boss:n
+    - camera:n
+    - ceccd:u
+    - csnd:n
+    - dsp:n
+    - gsp:n
+    - hid:n
+    - http:n
+    - ir:u
+    - mic:n
+    - ndm:n
+    - news:n
+    - nwm:n
+    - ptm:n
+    - soc:u
+    - ssl:c
+    - y2r:n
