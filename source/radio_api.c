@@ -181,7 +181,7 @@ static int station_visitor(const JsonDoc *doc, void *userdata) {
     return 0;
 }
 
-/* Fetch and parse a list of stations from a URL */
+/* Fetch and parse a list of stations from a URL, with HTTP fallback */
 static int fetch_stations(const char *url, RadioStation *stations, int max_stations,
                            char *error, size_t error_size) {
     if (!initialized) {
@@ -194,8 +194,23 @@ static int fetch_stations(const char *url, RadioStation *stations, int max_stati
 
     int ret = net_get(url, &response, &response_size, error, error_size);
     if (ret != NET_OK) {
-        if (error) snprintf(error, error_size, "HTTP error: %d", ret);
-        return -1;
+        /* If HTTPS fails with TLS error, try HTTP fallback */
+        if (ret == NET_ERROR_TLS_VERIFY) {
+            /* Replace https:// with http:// in URL */
+            char http_url[512];
+            if (strncmp(url, "https://", 8) == 0) {
+                snprintf(http_url, sizeof(http_url), "http://%s", url + 8);
+                free(response);
+                response = NULL;
+                response_size = 0;
+                ret = net_get(http_url, &response, &response_size, error, error_size);
+            }
+        }
+        if (ret != NET_OK) {
+            if (error && !error[0])
+                snprintf(error, error_size, "HTTP error: %d", ret);
+            return -1;
+        }
     }
 
     if (!response || response_size == 0) {
@@ -250,8 +265,19 @@ int radio_fetch_tags(RadioTag *tags, int max_tags,
 
     int ret = net_get(TAG_LIST_URL, &response, &response_size, error, error_size);
     if (ret != NET_OK) {
-        if (error) snprintf(error, error_size, "HTTP error: %d", ret);
-        return -1;
+        /* Fallback to HTTP if HTTPS fails with TLS error */
+        if (ret == NET_ERROR_TLS_VERIFY) {
+            const char *http_url = TAG_LIST_URL + 0;
+            /* Build HTTP URL manually */
+            char http_url_buf[512];
+            snprintf(http_url_buf, sizeof(http_url_buf), "http://de1.api.radio-browser.info/json/tags?limit=50&order=stationcount&reverse=true&hidebroken=true");
+            free(response); response = NULL; response_size = 0;
+            ret = net_get(http_url_buf, &response, &response_size, error, error_size);
+        }
+        if (ret != NET_OK) {
+            if (error) snprintf(error, error_size, "HTTP error: %d", ret);
+            return -1;
+        }
     }
 
     if (!response || response_size == 0) {

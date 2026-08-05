@@ -157,7 +157,8 @@ static NetError perform_with_retry(CURL *curl, struct MemoryBuffer *chunk,
 
         /* Map error */
         if (res == CURLE_SSL_CONNECT_ERROR || res == CURLE_PEER_FAILED_VERIFICATION ||
-            res == CURLE_SSL_CERTPROBLEM || res == CURLE_SSL_CIPHER) {
+            res == CURLE_SSL_CERTPROBLEM || res == CURLE_SSL_CIPHER ||
+            res == CURLE_SSL_CACERT) {
             return NET_ERROR_TLS_VERIFY;
         }
         if (res == CURLE_OPERATION_TIMEDOUT) return NET_ERROR_TIMEOUT;
