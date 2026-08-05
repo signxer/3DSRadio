@@ -5,6 +5,7 @@
 #include <string.h>
 #include <time.h>
 #include <math.h>
+#include <stdarg.h>
 
 #include "net.h"
 #include "radio_api.h"
@@ -88,13 +89,6 @@ static const char *main_menu_items[] = {
     "About",
 };
 #define MAIN_MENU_COUNT 4
-
-static const char *menu_icons[] = {
-    "",  /* Music note - will use text */
-    "",  /* Star */
-    "",  /* Search */
-    "",  /* Info */
-};
 
 typedef struct {
     AppScreen screen;
@@ -245,7 +239,9 @@ static void draw_status_bar(void) {
             float alpha = 1.0f;
             if (elapsed > 3000) alpha = 1.0f - (float)(elapsed - 3000) / 1000.0f;
             u32 c = app.status_color;
-            /* Apply alpha */
+            /* Apply alpha by modifying the alpha channel */
+            u8 a = (u8)((c & 0xFF) * alpha);
+            c = (c & 0xFFFFFF00) | a;
             draw_label(150, TOP_HEIGHT - 18, 0.4f, c, "%s", app.status_text);
         }
     }
