@@ -27,7 +27,7 @@ ifneq ($(strip $(DEVKITARM)),)
   # Include devkitPro's standard 3DS build rules
   include $(DEVKITARM)/3ds_rules
 
-  # Architecture flags
+  # Architecture flags (compiler only)
   ARCH          := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 
   # Compiler flags
@@ -37,8 +37,9 @@ ifneq ($(strip $(DEVKITARM)),)
 
   CFLAGS        += $(INCLUDE)  # Set by 3ds_rules
 
-  # Linker flags
-  LDFLAGS       := -specs=3dsx.specs $(ARCH) -Wl,-Map,$(TARGET).map
+  # Linker flags (no -mtp=soft, it's compiler-only)
+  LDFLAGS       := -specs=3dsx.specs -march=armv6k -mtune=mpcore -mfloat-abi=hard \
+                   -Wl,-Map,$(TARGET).map
 
   # Libraries
   LIBS          := -lcitro2d -lcitro3d -lcurl -lmbedtls -lmbedx509 \
