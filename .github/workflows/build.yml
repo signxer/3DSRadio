@@ -20,14 +20,19 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # Install base system build tools (Arch Linux repos)
+          pacman -Sy --noconfirm 2>&1 | tail -3
+          pacman -S --noconfirm git make gcc python 2>&1 | tail -5 || true
+
+          # Install 3DS dev libraries (devkitPro repos)
           dkp-pacman -Sy --noconfirm 2>&1 | tail -3
           dkp-pacman -S --noconfirm \
-            3ds-libcurl 3ds-mbedtls 3ds-libpng 3ds-libjpeg-turbo \
-            python git cmake make gcc 2>&1 | tail -5 || true
+            3ds-libcurl 3ds-mbedtls 3ds-libpng 3ds-libjpeg-turbo 2>&1 | tail -5 || true
 
           # Build bannertool from source
           if ! command -v bannertool &>/dev/null; then
-            echo "Building bannertool from source..."
+            echo "Building bannertool..."
+            git config --global advice.detachedHead false
             git clone --depth 1 https://github.com/devkitPro/bannertool.git /tmp/bannertool
             cd /tmp/bannertool && make -j$(nproc)
             cp bannertool /usr/local/bin/
@@ -36,15 +41,15 @@ jobs:
 
           # Build makerom from source
           if ! command -v makerom &>/dev/null; then
-            echo "Building makerom from source..."
+            echo "Building makerom..."
             git clone --depth 1 https://github.com/devkitPro/makerom.git /tmp/makerom
             cd /tmp/makerom && make -j$(nproc)
             cp makerom /usr/local/bin/
             echo "makerom built"
           fi
 
-          command -v bannertool && bannertool --version 2>&1 || echo "bannertool not available"
-          command -v makerom && makerom -version 2>&1 || echo "makerom not available"
+          which bannertool 2>/dev/null && echo "bannertool OK" || echo "bannertool not available"
+          which makerom 2>/dev/null && echo "makerom OK" || echo "makerom not available"
 
       - name: Generate placeholder assets
         run: |
