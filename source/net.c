@@ -87,6 +87,7 @@ int net_init(void) {
         linearFree(soc_buffer);
         soc_buffer = NULL;
         return NET_ERROR_TRANSPORT;
+    }
 
     curl_global_init(CURL_GLOBAL_ALL);
     net_initialized = true;
