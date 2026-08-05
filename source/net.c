@@ -87,7 +87,6 @@ int net_init(void) {
         linearFree(soc_buffer);
         soc_buffer = NULL;
         return NET_ERROR_TRANSPORT;
-    }
 
     curl_global_init(CURL_GLOBAL_ALL);
     net_initialized = true;
@@ -160,10 +159,9 @@ static NetError perform_with_retry(CURL *curl, struct MemoryBuffer *chunk,
             return NET_ERROR_TLS_VERIFY;
         }
         if (res == CURLE_OPERATION_TIMEDOUT) return NET_ERROR_TIMEOUT;
-        if (res == CURLE_COULDNT_CONNECT || res == CURLE_SEND_ERROR ||
-            res == CURLE_RECV_ERROR) {
+        if (res == CURLE_COULDNT_RESOLVE_HOST || res == CURLE_COULDNT_RESOLVE_PROXY || res == CURLE_COULDNT_CONNECT || res == CURLE_SEND_ERROR ||
+            res == CURLE_RECV_ERROR || res == CURLE_GOT_NOTHING)
             return NET_ERROR_TRANSPORT;
-        }
         if (res == CURLE_ABORTED_BY_CALLBACK) return NET_ERROR_CANCELLED;
         if (http_code == 401 || http_code == 403) return NET_ERROR_AUTH;
         return NET_ERROR_HTTP;
@@ -272,7 +270,6 @@ int net_get_stream(const char *url,
         if (res == CURLE_OPERATION_TIMEDOUT) return NET_ERROR_TIMEOUT;
         if (res == CURLE_COULDNT_CONNECT) return NET_ERROR_TRANSPORT;
         return NET_ERROR_TRANSPORT;
-    }
     return NET_OK;
 }
 
