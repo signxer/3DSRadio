@@ -38,7 +38,9 @@ ifneq ($(strip $(DEVKITARM)),)
   CFLAGS        := -g -Wall -Wextra -Wshadow -O2 -std=gnu11 \
                    $(ARCH) -mword-relocations -ffunction-sections \
                    -D__3DS__ -DHAVE_3DS \
-                   $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir))
+                   -I$(CURDIR)/$(INCLUDES) \
+                   -I$(CTRULIB)/include \
+                   -I$(PORTLIBS)/include
 
   CXXFLAGS      := $(CFLAGS) -fno-rtti -fno-exceptions
   ASFLAGS       := -g $(ARCH)
