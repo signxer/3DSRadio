@@ -202,8 +202,7 @@ int net_get_controlled(const char *url, char **buffer, size_t *buffer_size,
         if (buffer) *buffer = NULL;
         if (buffer_size) *buffer_size = 0;
         if (error) {
-            const char *curl_err = curl_easy_strerror(curl_easy_last_result(curl));
-            snprintf(error, error_size, "%s", curl_err);
+            snprintf(error, error_size, "Request failed (error %d)", result);
         }
     }
 

@@ -633,6 +633,13 @@ static void render_station_info(void) {
     draw_status_bar();
 }
 
+/* Forward declarations for functions used in handle_input */
+static void set_status(const char *fmt, u32 color, ...);
+static void load_tags(void);
+static void load_top_stations(void);
+static void load_stations_by_tag(const char *tag);
+static void play_station(int index);
+
 /* ======================================================================
  * Input Handling with Touch Support
  * ====================================================================== */
