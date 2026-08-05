@@ -236,3 +236,118 @@ bool json_is_null(const JsonDoc *doc, int token) {
     size_t len = (size_t)(t->end - t->start);
     return len == 4 && memcmp(doc->text + t->start, "null", 4) == 0;
 }
+
+/* ======================================================================
+ * Array visitor for radio_api.c - parse array of objects without
+ * needing to allocate enough tokens for the entire document
+ * ====================================================================== */
+
+static char *find_key_array(char *text, const char *key) {
+    size_t key_length = strlen(key);
+    for (char *cursor = text; *cursor; cursor++) {
+        if (*cursor != '"') continue;
+        char *start = cursor + 1;
+        char *end = start;
+        bool escaped = false;
+        while (*end) {
+            if (escaped) escaped = false;
+            else if (*end == '\\') escaped = true;
+            else if (*end == '"') break;
+            end++;
+        }
+        if (!*end) return NULL;
+        bool matches = (size_t)(end - start) == key_length &&
+                       memcmp(start, key, key_length) == 0;
+        cursor = end;
+        if (!matches) continue;
+        char *value = end + 1;
+        while (*value == ' ' || *value == '\t' ||
+               *value == '\r' || *value == '\n') value++;
+        if (*value != ':') continue;
+        value++;
+        while (*value == ' ' || *value == '\t' ||
+               *value == '\r' || *value == '\n') value++;
+        if (*value == '[') return value + 1;
+    }
+    return NULL;
+}
+
+static int next_array_object(char **cursor, char **object, size_t *length) {
+    char *current = *cursor;
+    while (*current == ' ' || *current == '\t' || *current == '\r' ||
+           *current == '\n' || *current == ',') current++;
+    if (*current == ']') {
+        *cursor = current + 1;
+        return 0;
+    }
+    if (*current != '{') return JSON_VISIT_INVALID;
+
+    char *start = current;
+    int depth = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (; *current; current++) {
+        char c = *current;
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') in_string = false;
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+        } else if (c == '{') {
+            depth++;
+        } else if (c == '}') {
+            if (--depth < 0) return JSON_VISIT_INVALID;
+            if (depth == 0) {
+                *object = start;
+                *length = (size_t)(current - start + 1);
+                *cursor = current + 1;
+                return 1;
+            }
+        }
+    }
+    return JSON_VISIT_INVALID;
+}
+
+int json_visit_array_objects(char *text, const char *key,
+                             JsonToken *tokens, int capacity,
+                             JsonObjectVisitor visitor, void *userdata) {
+    if (!text || !tokens || capacity <= 0 || !visitor)
+        return JSON_VISIT_INVALID;
+
+    char *cursor;
+    if (key && key[0]) {
+        cursor = find_key_array(text, key);
+        if (!cursor) return JSON_VISIT_NOT_FOUND;
+    } else {
+        /* No key means the root is the array */
+        cursor = text;
+        while (*cursor && *cursor != '[') cursor++;
+        if (!*cursor) return JSON_VISIT_INVALID;
+        cursor++;
+    }
+
+    int visited = 0;
+    for (;;) {
+        char *object = NULL;
+        size_t length = 0;
+        int next = next_array_object(&cursor, &object, &length);
+        if (next <= 0) return next == 0 ? visited : next;
+        char saved = object[length];
+        object[length] = '\0';
+        JsonDoc doc;
+        int parsed = json_parse(&doc, object, tokens, capacity);
+        if (parsed < 0) {
+            object[length] = saved;
+            return parsed == -1 ? JSON_VISIT_TOKENS_EXHAUSTED :
+                                  JSON_VISIT_INVALID;
+        }
+        int visit = visitor(&doc, userdata);
+        object[length] = saved;
+        visited++;
+        if (visit > 0) return visited;
+        if (visit < 0) return JSON_VISIT_CALLBACK_FAILED;
+    }
+}
