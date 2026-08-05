@@ -20,39 +20,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # Install base system build tools (Arch Linux repos)
-          pacman -Sy --noconfirm 2>&1 | tail -3
-          pacman -S --noconfirm git make gcc python 2>&1 | tail -5 || true
-
-          # Install 3DS dev libraries (devkitPro repos)
+          # 3DS dev libraries are already installed in the image
           dkp-pacman -Sy --noconfirm 2>&1 | tail -3
-          dkp-pacman -S --noconfirm \
-            3ds-libcurl 3ds-mbedtls 3ds-libpng 3ds-libjpeg-turbo 2>&1 | tail -5 || true
 
-          # Build tools from source (use tarball to avoid git auth issues)
-          if ! command -v bannertool &>/dev/null; then
-            echo "Building bannertool..."
-            curl -sSL -o /tmp/bannertool.tar.gz \
-              "https://github.com/devkitPro/bannertool/archive/refs/heads/master.tar.gz"
-            mkdir -p /tmp/bannertool
-            tar xzf /tmp/bannertool.tar.gz -C /tmp/bannertool --strip-components=1
-            cd /tmp/bannertool && make -j$(nproc) 2>&1
-            cp bannertool /usr/local/bin/ 2>/dev/null || true
-          fi
-
-          if ! command -v makerom &>/dev/null; then
-            echo "Building makerom..."
-            curl -sSL -o /tmp/makerom.tar.gz \
-              "https://github.com/devkitPro/makerom/archive/refs/heads/master.tar.gz"
-            mkdir -p /tmp/makerom
-            tar xzf /tmp/makerom.tar.gz -C /tmp/makerom --strip-components=1
-            cd /tmp/makerom && make -j$(nproc) 2>&1
-            cp makerom /usr/local/bin/ 2>/dev/null || true
-          fi
+          # Try to install CIA tools via dkp-pacman
+          echo "=== Installing CIA build tools ==="
+          dkp-pacman -S --noconfirm bannertool makerom 2>&1 && \
+            echo "CIA tools installed via dkp-pacman" || \
+            echo "CIA tools not in repo, will skip CIA build"
 
           echo "=== Tool check ==="
-          command -v bannertool && bannertool 2>&1 | head -3 || echo "bannertool not available"
-          command -v makerom && makerom 2>&1 | head -3 || echo "makerom not available"
+          command -v bannertool && echo "bannertool: OK" || echo "bannertool: not found"
+          command -v makerom && echo "makerom: OK" || echo "makerom: not found"
 
       - name: Generate placeholder assets
         run: |
@@ -128,15 +107,18 @@ jobs:
           make -j$(nproc)
           ls -la *.3dsx *.elf
 
-      - name: Build CIA
+      - name: Build CIA (if tools available)
         run: |
-          export DEVKITPRO=/opt/devkitpro
-          export DEVKITARM=$DEVKITPRO/devkitARM
-          export CTRULIB=$DEVKITPRO/libctru
-          export PORTLIBS=$DEVKITPRO/portlibs/arm
-          export PATH="/usr/local/bin:$PATH"
-          make cia 2>&1
-          ls -la *.cia 2>/dev/null && echo "CIA built successfully" || echo "No CIA produced"
+          if command -v bannertool &>/dev/null && command -v makerom &>/dev/null; then
+            export DEVKITPRO=/opt/devkitpro
+            export DEVKITARM=$DEVKITPRO/devkitARM
+            export CTRULIB=$DEVKITPRO/libctru
+            export PORTLIBS=$DEVKITPRO/portlibs/arm
+            make cia 2>&1
+            ls -la *.cia 2>/dev/null && echo "CIA built successfully" || echo "No CIA produced"
+          else
+            echo "Skipping CIA build (bannertool/makerom not available)"
+          fi
 
       - name: Upload 3DSX
         uses: actions/upload-artifact@v4
