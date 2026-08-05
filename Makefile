@@ -70,7 +70,9 @@ $(BUILD):
 	@mkdir -p $@
 
 $(TARGET).3dsx: $(TARGET).elf
-	@3dsxtool $< $@ --romfs=$(CURDIR)/$(ROMFS)
+	@smdhtool --create "$(TITLE)" "$(DESCRIPTION)" "$(AUTHOR)" "" romfs/icon.png $(TARGET).smdh 2>/dev/null || true
+	@3dsxtool $< $@ --romfs=$(CURDIR)/$(ROMFS) --smdh=$(TARGET).smdh 2>/dev/null || \
+	 3dsxtool $< $@ --romfs=$(CURDIR)/$(ROMFS)
 	@echo "  built $(TARGET).3dsx"
 
 $(TARGET).elf: $(OFILES:%=$(BUILD)/%)
