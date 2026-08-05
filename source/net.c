@@ -271,6 +271,7 @@ int net_get_stream(const char *url,
         if (res == CURLE_OPERATION_TIMEDOUT) return NET_ERROR_TIMEOUT;
         if (res == CURLE_COULDNT_CONNECT) return NET_ERROR_TRANSPORT;
         return NET_ERROR_TRANSPORT;
+    }
     return NET_OK;
 }
 
