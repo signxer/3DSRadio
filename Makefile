@@ -69,8 +69,30 @@ all: $(BUILD) $(TARGET).3dsx
 $(BUILD):
 	@mkdir -p $@
 
-$(TARGET).3dsx: $(TARGET).elf
-	@3dsxtool $< $@ --romfs=$(CURDIR)/$(ROMFS)
+$(TARGET).smdh:
+	@# Generate a minimal valid SMDH with default icon
+	python3 -c "
+import struct
+data = bytearray(0x3000)
+data[0:4] = b'SMDH'
+struct.pack_into('<H', data, 4, 0x0100)
+title = '3DSRadio'.encode('utf-16-le')
+for i in range(0x200):
+    data[0x200 + i] = title[i % len(title)] if i < len(title) else 0
+long = 'Internet Radio Player'.encode('utf-16-le')
+for i in range(0x200):
+    data[0x400 + i] = long[i % len(long)] if i < len(long) else 0
+pub = '3DSRadio'.encode('utf-16-le')
+for i in range(0x200):
+    data[0x600 + i] = pub[i % len(pub)] if i < len(pub) else 0
+struct.pack_into('<I', data, 0x1F04, 0xFFFFFFFF)
+struct.pack_into('<I', data, 0x1F08, 0x00000003)
+with open('$@', 'wb') as f:
+    f.write(data)
+" 2>/dev/null || true
+
+$(TARGET).3dsx: $(TARGET).elf $(TARGET).smdh
+	@3dsxtool $< $@ --romfs=$(CURDIR)/$(ROMFS) --smdh=$(TARGET).smdh
 	@echo "  built $(TARGET).3dsx"
 
 $(TARGET).elf: $(OFILES:%=$(BUILD)/%)
