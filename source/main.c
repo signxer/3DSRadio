@@ -10,6 +10,7 @@
 #include "net.h"
 #include "radio_api.h"
 #include "json.h"
+#include "locale.h"
 
 /* ======================================================================
  * 3DSRadio - Flat Aero UI Design
@@ -82,12 +83,7 @@ typedef enum {
     SCREEN_STATION_INFO,
 } AppScreen;
 
-static const char *main_menu_items[] = {
-    "Browse by Genre",
-    "Top Stations",
-    "Search Stations",
-    "About",
-};
+/* Menu items - loaded from locale */
 #define MAIN_MENU_COUNT 4
 
 typedef struct {
@@ -275,8 +271,8 @@ static void render_main_menu(void) {
     draw_label(TOP_WIDTH/2 - 30, 55, 1.8f, CLR_ACCENT, "R");
 
     /* Title */
-    draw_label(20, 140, 0.7f, CLR_TEXT_SEC, "Internet Radio");
-    draw_label(20, 162, 0.5f, CLR_TEXT_DIM, "Powered by radio-browser.info");
+    draw_label(20, 140, 0.7f, CLR_TEXT_SEC, "%s", tr_main_subtitle());
+    draw_label(20, 162, 0.5f, CLR_TEXT_DIM, "%s", tr_about_powered());
     draw_label(20, 185, 0.4f, CLR_TEXT_DIM, "Browse thousands of stations worldwide");
 
     /* Bottom screen: menu */
@@ -285,23 +281,21 @@ static void render_main_menu(void) {
 
     draw_label(15, 8, 0.55f, CLR_TEXT_SEC, "Menu");
 
+    const char *items[] = {
+        tr_menu_browse_genre(), tr_menu_top_stations(),
+        tr_menu_search(), tr_menu_about()
+    };
     for (int i = 0; i < MAIN_MENU_COUNT; i++) {
         int y = 35 + i * 48;
         bool sel = (i == app.selection);
 
-        /* Card background */
         draw_card(10, y, BOT_WIDTH - 20, 40, sel);
 
-        /* Accent bar on selected */
         if (sel) {
             C2D_DrawRectSolid(10, y, 0.6f, 3, 40, CLR_ACCENT);
         }
 
-        /* Menu label */
-        draw_label(22, y + 10, 0.55f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s",
-                   main_menu_items[i]);
-
-        /* Chevron */
+        draw_label(22, y + 10, 0.55f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", items[i]);
         draw_label(BOT_WIDTH - 30, y + 10, 0.5f, CLR_TEXT_DIM, ">");
     }
 
@@ -313,7 +307,7 @@ static void render_main_menu(void) {
  * ====================================================================== */
 
 static void render_tag_list(void) {
-    draw_hero_header("Browse by Genre", "Select a music genre to explore stations");
+    draw_hero_header(tr_genre_header(), tr_genre_subtitle());
 
     select_bottom();
     clear_bottom();
@@ -356,9 +350,7 @@ static void render_tag_list(void) {
  * ====================================================================== */
 
 static void render_station_list(void) {
-    char header[64];
-    snprintf(header, sizeof(header), "%d stations found", app.station_count);
-    draw_hero_header("Stations", header);
+    draw_hero_header(tr_stations_header(), tr_stations_found(app.station_count));
 
     select_bottom();
     clear_bottom();
@@ -497,14 +489,14 @@ static void render_playing(void) {
     select_bottom();
     clear_bottom();
 
-    draw_label(15, 12, 0.5f, CLR_TEXT_SEC, "Playback Controls");
+    draw_label(15, 12, 0.5f, CLR_TEXT_SEC, "%s", tr_controls());
 
     /* Control buttons as cards */
     struct { const char *label; const char *key; u32 color; } controls[] = {
-        {"Play/Pause", "A", CLR_ACCENT},
-        {"Stop & Back", "B", CLR_ACCENT3},
-        {"Vol Down", "X", CLR_TEXT_DIM},
-        {"Vol Up", "Y", CLR_ACCENT2},
+        {tr_play_pause(), "A", CLR_ACCENT},
+        {tr_stop_back(), "B", CLR_ACCENT3},
+        {tr_vol_down(), "X", CLR_TEXT_DIM},
+        {tr_vol_up(), "Y", CLR_ACCENT2},
     };
 
     for (int i = 0; i < 4; i++) {
@@ -530,7 +522,7 @@ static void render_playing(void) {
             strcpy(url_display, app.stream_url);
         }
         draw_rounded_rect(8, 120, BOT_WIDTH - 16, 35, 6, CLR_SURFACE);
-        draw_label(15, 128, 0.3f, CLR_TEXT_DIM, "Stream URL");
+        draw_label(15, 128, 0.3f, CLR_TEXT_DIM, "%s", tr_stream_url());
         draw_label(15, 140, 0.3f, CLR_ACCENT, "%s", url_display);
     }
 
@@ -542,23 +534,23 @@ static void render_playing(void) {
  * ====================================================================== */
 
 static void render_search(void) {
-    draw_hero_header("Search Stations", "Find stations by name");
+    draw_hero_header(tr_search_header(), tr_search_prompt());
 
     select_bottom();
     clear_bottom();
 
     /* Search input area */
     draw_rounded_rect(10, 20, BOT_WIDTH - 20, 40, 8, CLR_SURFACE);
-    draw_label(20, 28, 0.35f, CLR_TEXT_DIM, "Search query:");
+    draw_label(20, 28, 0.35f, CLR_TEXT_DIM, "%s", tr_search_prompt());
     draw_label(20, 42, 0.5f, CLR_ACCENT,
                strlen(app.search_query) > 0 ? "%s_" : "Type a station name...",
                app.search_query);
 
     /* Hint */
     draw_rounded_rect(10, 80, BOT_WIDTH - 20, 55, 8, CLR_SURFACE);
-    draw_label(20, 88, 0.35f, CLR_TEXT_DIM, "Enter a station name");
-    draw_label(20, 102, 0.35f, CLR_TEXT_DIM, "then press A to search");
-    draw_label(20, 116, 0.35f, CLR_TEXT_DIM, "or B to go back");
+    draw_label(20, 88, 0.35f, CLR_TEXT_DIM, "%s", tr_search_prompt());
+    draw_label(20, 102, 0.35f, CLR_TEXT_DIM, "%s", tr_search_action());
+    draw_label(20, 116, 0.35f, CLR_TEXT_DIM, "%s", tr_back());
 
     draw_status_bar();
 }
@@ -578,37 +570,37 @@ static void render_station_info(void) {
     select_top();
     clear_top();
 
-    draw_label(20, 20, 0.8f, CLR_TEXT, "Station Info");
+    draw_label(20, 20, 0.8f, CLR_TEXT, "%s", tr_station_info());
 
     /* Info card */
     draw_rounded_rect(10, 50, TOP_WIDTH - 20, 160, 8, CLR_SURFACE);
 
     int y = 60;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "Name:");
+    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_name());
     draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->name);
 
     y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "Country:");
+    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_country());
     draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->country[0] ? s->country : "N/A");
 
     y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "Codec:");
+    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_codec());
     draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->codec[0] ? s->codec : "N/A");
 
     y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "Bitrate:");
+    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_bitrate());
     draw_label(120, y, 0.45f, CLR_TEXT, "%d kbps", s->bitrate);
 
     y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "Language:");
+    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_language());
     draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->language[0] ? s->language : "N/A");
 
     y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "Votes:");
+    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_votes());
     draw_label(120, y, 0.45f, CLR_TEXT, "%d", s->votes);
 
     y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "Clicks:");
+    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_clicks());
     draw_label(120, y, 0.45f, CLR_TEXT, "%d", s->clickcount);
 
     select_bottom();
@@ -619,12 +611,12 @@ static void render_station_info(void) {
     /* Tags section */
     if (strlen(s->tags) > 0) {
         draw_rounded_rect(8, 40, BOT_WIDTH - 16, 50, 6, CLR_SURFACE);
-        draw_label(15, 46, 0.35f, CLR_TEXT_DIM, "Tags:");
+        draw_label(15, 46, 0.35f, CLR_TEXT_DIM, "%s", tr_tags());
         draw_label(15, 60, 0.4f, CLR_ACCENT, "%s", s->tags);
     }
 
     draw_rounded_rect(8, BOT_HEIGHT - 40, BOT_WIDTH - 16, 32, 6, CLR_SURFACE);
-    draw_label(15, BOT_HEIGHT - 35, 0.4f, CLR_TEXT_DIM, "Press B to return");
+    draw_label(15, BOT_HEIGHT - 35, 0.4f, CLR_TEXT_DIM, "%s", tr_back());
 
     draw_status_bar();
 }
@@ -948,6 +940,10 @@ int main(void) {
     /* Initialize networking */
     net_init();
     radio_init();
+
+    /* Set Chinese language and try to load Chinese font */
+    locale_set_language(LANG_ZH_CN);
+    locale_init_fonts();
 
     /* App state */
     memset(&app, 0, sizeof(app));
