@@ -69,9 +69,12 @@ all: $(BUILD) $(TARGET).3dsx
 $(BUILD):
 	@mkdir -p $@
 
-$(TARGET).3dsx: $(TARGET).elf
-	@smdhtool --create "$(TITLE)" "$(DESCRIPTION)" "$(AUTHOR)" "" romfs/icon.png $(TARGET).smdh 2>/dev/null || true
-	@3dsxtool $< $@ --romfs=$(CURDIR)/$(ROMFS) --smdh=$(TARGET).smdh 2>/dev/null || \
+$(TARGET).smdh: romfs/icon.png
+	@smdhtool --create "$(TITLE)" "$(DESCRIPTION)" "$(AUTHOR)" "" $< $@ || \
+	 { echo "  WARNING: smdhtool failed, using no SMDH"; touch $@; }
+
+$(TARGET).3dsx: $(TARGET).elf $(TARGET).smdh
+	@3dsxtool $< $@ --romfs=$(CURDIR)/$(ROMFS) --smdh=$(TARGET).smdh || \
 	 3dsxtool $< $@ --romfs=$(CURDIR)/$(ROMFS)
 	@echo "  built $(TARGET).3dsx"
 
