@@ -18,11 +18,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install additional packages
+      - name: Install dependencies
         run: |
+          # Update package database and install tools
+          dkp-pacman -Sy --noconfirm 2>&1 | tail -3
           dkp-pacman -S --noconfirm \
             3ds-libcurl 3ds-mbedtls 3ds-libpng 3ds-libjpeg-turbo \
-            bannertool makerom python || true
+            devkitpro-devtools python 2>&1 | tail -10 || true
+
+          # Fallback: download bannertool and makerom if not installed
+          if ! command -v bannertool &>/dev/null; then
+            echo "Downloading bannertool..."
+            curl -sSL -o /usr/local/bin/bannertool \
+              "https://github.com/devkitPro/bannertool/releases/latest/download/bannertool-x86_64-linux-gnu" 2>/dev/null || \
+            curl -sSL -o /usr/local/bin/bannertool \
+              "https://github.com/devkitPro/bannertool/releases/download/v1.2.0/bannertool-x86_64-linux-gnu" 2>/dev/null || true
+            chmod +x /usr/local/bin/bannertool 2>/dev/null || true
+          fi
+          if ! command -v makerom &>/dev/null; then
+            echo "Downloading makerom..."
+            curl -sSL -o /usr/local/bin/makerom \
+              "https://github.com/devkitPro/makerom/releases/latest/download/makerom-x86_64-linux-gnu" 2>/dev/null || \
+            curl -sSL -o /usr/local/bin/makerom \
+              "https://github.com/devkitPro/makerom/releases/download/v0.18.4/makerom-x86_64-linux-gnu" 2>/dev/null || true
+            chmod +x /usr/local/bin/makerom 2>/dev/null || true
+          fi
+          command -v bannertool && bannertool --version 2>&1 || echo "bannertool not available"
+          command -v makerom && makerom -version 2>&1 || echo "makerom not available"
 
       - name: Generate placeholder assets
         run: |
@@ -104,8 +126,9 @@ jobs:
           export DEVKITARM=$DEVKITPRO/devkitARM
           export CTRULIB=$DEVKITPRO/libctru
           export PORTLIBS=$DEVKITPRO/portlibs/arm
-          make cia 2>&1 || echo "CIA build note: may need additional tools"
-          ls -la *.cia 2>/dev/null || echo "No CIA produced"
+          export PATH="/usr/local/bin:$PATH"
+          make cia 2>&1
+          ls -la *.cia 2>/dev/null && echo "CIA built successfully" || echo "No CIA produced"
 
       - name: Upload 3DSX
         uses: actions/upload-artifact@v4

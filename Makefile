@@ -93,14 +93,14 @@ $(BUILD)/%.o: %.cpp
 #-------------------------------------------------------------------------------
 cia: $(TARGET).3dsx
 	@echo "  building CIA..."
-	@bannertool makebanner -i romfs/banner.png -a romfs/banner.wav -o romfs/banner.bnr 2>/dev/null; \
+	@bannertool makebanner -i romfs/banner.png -a romfs/banner.wav -o romfs/banner.bnr ; \
 	bannertool makesmdh -s "$(TITLE)" -l "$(DESCRIPTION)" -p "$(AUTHOR)" \
-		-i romfs/icon.png -o romfs/icon.icn 2>/dev/null; \
+		-i romfs/icon.png -o romfs/icon.icn ; \
 	makerom -f cia -o $(TARGET).cia -rsf romfs/template.rsf \
 		-target t -exefslogo -elf $(TARGET).elf \
 		-icon romfs/icon.icn -banner romfs/banner.bnr \
 		-DAPP_TITLE="$(TITLE)" -DAPP_PRODUCT_CODE="$(PRODUCT_CODE)" \
-		-DAPP_UNIQUE_ID="$(UNIQUE_ID)" 2>/dev/null; \
+		-DAPP_UNIQUE_ID="$(UNIQUE_ID)" ; \
 	echo "  CIA built: $(TARGET).cia"
 
 clean:
