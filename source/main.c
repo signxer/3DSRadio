@@ -835,6 +835,10 @@ static void set_status(const char *fmt, u32 color, ...) {
 }
 
 static void load_tags(void) {
+    if (!net_wifi_status()) {
+        set_status("WiFi not connected - check emulator network settings", CLR_ERR);
+        return;
+    }
     set_status("Loading genres...", CLR_INFO);
 
     char error[128];
@@ -847,11 +851,15 @@ static void load_tags(void) {
         app.screen = SCREEN_TAG_LIST;
         set_status("%d genres loaded", CLR_OK, count);
     } else {
-        set_status("Failed to load genres", CLR_ERR);
+        set_status("Failed: %s", CLR_ERR, error[0] ? error : "Network error");
     }
 }
 
 static void load_top_stations(void) {
+    if (!net_wifi_status()) {
+        set_status("WiFi not connected - check emulator network settings", CLR_ERR);
+        return;
+    }
     set_status("Loading top stations...", CLR_INFO);
 
     char error[128];
@@ -864,11 +872,15 @@ static void load_top_stations(void) {
         app.screen = SCREEN_STATION_LIST;
         set_status("Top stations loaded", CLR_OK);
     } else {
-        set_status("Failed to load stations", CLR_ERR);
+        set_status("Failed: %s", CLR_ERR, error[0] ? error : "Network error");
     }
 }
 
 static void load_stations_by_tag(const char *tag) {
+    if (!net_wifi_status()) {
+        set_status("WiFi not connected - check emulator network settings", CLR_ERR);
+        return;
+    }
     set_status("Loading stations...", CLR_INFO);
 
     char error[128];
@@ -881,7 +893,7 @@ static void load_stations_by_tag(const char *tag) {
         app.screen = SCREEN_STATION_LIST;
         set_status("Found %d stations", CLR_OK, count);
     } else {
-        set_status("No stations found for this genre", CLR_WARN);
+        set_status("Failed: %s", CLR_ERR, error[0] ? error : "No stations found");
     }
 }
 
