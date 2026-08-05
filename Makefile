@@ -28,9 +28,8 @@ ifneq ($(strip $(DEVKITARM)),)
 
   CFLAGS        := -g -Wall -Wextra -Wshadow -O2 -std=gnu11 \
                    $(ARCH) -mword-relocations -ffunction-sections \
-                   -D__3DS__ -DHAVE_3DS
-
-  CFLAGS        += $(INCLUDE)
+                   -D__3DS__ -DHAVE_3DS \
+                   $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir))
 
   LDFLAGS       := -specs=3dsx.specs $(ARCH) -Wl,-Map,$(TARGET).map
 
