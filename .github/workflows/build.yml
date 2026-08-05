@@ -3,104 +3,91 @@ name: Build 3DSRadio
 on:
   push:
     branches: [ "main", "dev" ]
-    paths-ignore:
-      - '**.md'
-      - 'scripts/**'
-      - '.github/**'
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
-    inputs:
-      build_cia:
-        description: 'Build CIA package'
-        type: boolean
-        default: true
-      build_3dsx:
-        description: 'Build 3DSX package'
-        type: boolean
-        default: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/devkitpro/devkitarm:latest
+      image: devkitpro/devkitarm:latest
       options: --user root
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
-      - name: Install dependencies
+      - name: Install additional packages
         run: |
           dkp-pacman -S --noconfirm \
-            3ds-libcurl \
-            3ds-mbedtls \
-            3ds-libpng \
-            3ds-libjpeg-turbo \
-            bannertool \
-            makerom \
-            python \
-            || true
+            3ds-libcurl 3ds-mbedtls 3ds-libpng 3ds-libjpeg-turbo \
+            bannertool makerom python || true
 
       - name: Generate placeholder assets
         run: |
-          # Create minimal valid banner.png (256x128 gradient)
-          python3 -c "
-import struct, zlib
-def make_png(w, h, pixels):
-    def chunk(ctype, data):
-        c = ctype + data
-        return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
-    header = b'\x89PNG\r\n\x1a\n'
-    ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
-    raw = b''
-    for row in pixels:
-        raw += b'\x00'  # filter byte
-        for r, g, b in row:
-            raw += struct.pack('BBB', r, g, b)
-    idat = chunk(b'IDAT', zlib.compress(raw))
-    iend = chunk(b'IEND', b'')
-    return header + ihdr + idat + iend
+          # Generate banner.png (256x128 RGB gradient) and icon.png (48x48)
+          python3 << 'EOF'
+          import struct, zlib
 
-# Banner: 256x128 gradient
-banner_pixels = []
-for y in range(128):
-    row = []
-    for x in range(256):
-        r = int(28 + (92 - 28) * y / 128)
-        g = int(28 + (158 - 28) * y / 128)
-        b = int(46 + (255 - 46) * y / 128)
-        row.append((r, g, b))
-    banner_pixels.append(row)
-with open('romfs/banner.png', 'wb') as f:
-    f.write(make_png(256, 128, banner_pixels))
+          def make_png(w, h, pixels):
+              def chunk(ctype, data):
+                  c = ctype + data
+                  return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+              header = b'\x89PNG\r\n\x1a\n'
+              ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
+              raw = b''
+              for row in pixels:
+                  raw += b'\x00'
+                  for rgb in row:
+                      raw += struct.pack('BBB', rgb[0], rgb[1], rgb[2])
+              return header + ihdr + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
 
-# Icon: 48x48 blue circle
-icon_pixels = []
-for y in range(48):
-    row = []
-    for x in range(48):
-        dx, dy = x - 24, y - 24
-        dist = (dx*dx + dy*dy) ** 0.5
-        if dist < 22:
-            a = max(0, int(255 * (1 - dist/24)))
-            row.append((92, 158, 255))
-        else:
-            row.append((0, 0, 0))
-    icon_pixels.append(row)
-with open('romfs/icon.png', 'wb') as f:
-    f.write(make_png(48, 48, icon_pixels))
-echo 'Assets generated'
-"
+          # Banner
+          bpix = []
+          for y in range(128):
+              row = []
+              for x in range(256):
+                  r = int(28 + (92 - 28) * y / 128)
+                  g = int(28 + (158 - 28) * y / 128)
+                  b = int(46 + (255 - 46) * y / 128)
+                  row.append((r, g, b))
+              bpix.append(row)
+          with open('romfs/banner.png', 'wb') as f:
+              f.write(make_png(256, 128, bpix))
+
+          # Icon (solid blue circle on black)
+          ipix = []
+          for y in range(48):
+              row = []
+              for x in range(48):
+                  dx, dy = x - 24, y - 24
+                  if dx*dx + dy*dy < 484:
+                      row.append((92, 158, 255))
+                  else:
+                      row.append((0, 0, 0))
+              ipix.append(row)
+          with open('romfs/icon.png', 'wb') as f:
+              f.write(make_png(48, 48, ipix))
+
+          # Silent WAV (100ms)
+          with open('romfs/banner.wav', 'wb') as f:
+              data_size = 800
+              f.write(b'RIFF')
+              f.write(struct.pack('<I', 36 + data_size))
+              f.write(b'WAVEfmt ')
+              f.write(struct.pack('<IHHIIHH', 16, 1, 1, 8000, 16000, 2, 16))
+              f.write(b'data')
+              f.write(struct.pack('<I', data_size))
+              f.write(b'\x00\x00' * 400)
+
+          print('Assets generated')
+          EOF
 
       - name: Download CA certificates
         run: |
-          echo "Downloading CA bundle..."
           curl -sSL -o romfs/cacert.pem https://curl.se/ca/cacert.pem
-          echo "CA certs: $(grep -c 'BEGIN CERTIFICATE' romfs/cacert.pem || true)"
+          echo "CA certs: $(grep -c 'BEGIN CERTIFICATE' romfs/cacert.pem)"
 
       - name: Build 3DSX
         run: |
@@ -112,16 +99,15 @@ echo 'Assets generated'
           ls -la *.3dsx *.elf
 
       - name: Build CIA
-        if: ${{ github.event_name == 'push' || github.event.inputs.build_cia == 'true' }}
         run: |
           export DEVKITPRO=/opt/devkitpro
           export DEVKITARM=$DEVKITPRO/devkitARM
           export CTRULIB=$DEVKITPRO/libctru
           export PORTLIBS=$DEVKITPRO/portlibs/arm
-          make cia || echo "CIA build failed (may need bannertool/makerom)"
+          make cia 2>&1 || echo "CIA build note: may need additional tools"
           ls -la *.cia 2>/dev/null || echo "No CIA produced"
 
-      - name: Upload 3DSX Artifact
+      - name: Upload 3DSX
         uses: actions/upload-artifact@v4
         with:
           name: 3DSRadio-3dsx
@@ -130,7 +116,7 @@ echo 'Assets generated'
             3DSRadio.elf
           if-no-files-found: warn
 
-      - name: Upload CIA Artifact
+      - name: Upload CIA
         uses: actions/upload-artifact@v4
         with:
           name: 3DSRadio-cia
@@ -141,11 +127,9 @@ echo 'Assets generated'
         run: |
           echo "## Build Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f 3DSRadio.3dsx ]; then
-            SIZE=$(stat -f%z 3DSRadio.3dsx 2>/dev/null || stat -c%s 3DSRadio.3dsx 2>/dev/null)
-            echo "✅ **3DSX**: $(printf '%d KB' $((SIZE/1024)))" >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ -f 3DSRadio.cia ]; then
-            SIZE=$(stat -f%z 3DSRadio.cia 2>/dev/null || stat -c%s 3DSRadio.cia 2>/dev/null)
-            echo "✅ **CIA**: $(printf '%d KB' $((SIZE/1024)))" >> $GITHUB_STEP_SUMMARY
-          fi
+          for f in 3DSRadio.3dsx 3DSRadio.cia; do
+            if [ -f "$f" ]; then
+              sz=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null)
+              echo "✅ **$(basename $f)**: $((sz/1024)) KB" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
