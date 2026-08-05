@@ -29,27 +29,30 @@ jobs:
           dkp-pacman -S --noconfirm \
             3ds-libcurl 3ds-mbedtls 3ds-libpng 3ds-libjpeg-turbo 2>&1 | tail -5 || true
 
-          # Build bannertool from source
+          # Build tools from source (use tarball to avoid git auth issues)
           if ! command -v bannertool &>/dev/null; then
             echo "Building bannertool..."
-            git config --global advice.detachedHead false
-            git clone --depth 1 https://github.com/devkitPro/bannertool.git /tmp/bannertool
-            cd /tmp/bannertool && make -j$(nproc)
-            cp bannertool /usr/local/bin/
-            echo "bannertool built"
+            curl -sSL -o /tmp/bannertool.tar.gz \
+              "https://github.com/devkitPro/bannertool/archive/refs/heads/master.tar.gz"
+            mkdir -p /tmp/bannertool
+            tar xzf /tmp/bannertool.tar.gz -C /tmp/bannertool --strip-components=1
+            cd /tmp/bannertool && make -j$(nproc) 2>&1
+            cp bannertool /usr/local/bin/ 2>/dev/null || true
           fi
 
-          # Build makerom from source
           if ! command -v makerom &>/dev/null; then
             echo "Building makerom..."
-            git clone --depth 1 https://github.com/devkitPro/makerom.git /tmp/makerom
-            cd /tmp/makerom && make -j$(nproc)
-            cp makerom /usr/local/bin/
-            echo "makerom built"
+            curl -sSL -o /tmp/makerom.tar.gz \
+              "https://github.com/devkitPro/makerom/archive/refs/heads/master.tar.gz"
+            mkdir -p /tmp/makerom
+            tar xzf /tmp/makerom.tar.gz -C /tmp/makerom --strip-components=1
+            cd /tmp/makerom && make -j$(nproc) 2>&1
+            cp makerom /usr/local/bin/ 2>/dev/null || true
           fi
 
-          which bannertool 2>/dev/null && echo "bannertool OK" || echo "bannertool not available"
-          which makerom 2>/dev/null && echo "makerom OK" || echo "makerom not available"
+          echo "=== Tool check ==="
+          command -v bannertool && bannertool 2>&1 | head -3 || echo "bannertool not available"
+          command -v makerom && makerom 2>&1 | head -3 || echo "makerom not available"
 
       - name: Generate placeholder assets
         run: |
