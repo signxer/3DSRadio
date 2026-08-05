@@ -70,6 +70,7 @@ $(BUILD):
 	@mkdir -p $@
 
 $(TARGET).3dsx: $(TARGET).elf
+	@3dsxtool $< $@ --romfs=$(CURDIR)/$(ROMFS)
 	@echo "  built $(TARGET).3dsx"
 
 $(TARGET).elf: $(OFILES:%=$(BUILD)/%)
