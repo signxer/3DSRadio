@@ -17,8 +17,7 @@
 #define RADIO_MAX_COUNTRY 64
 #define RADIO_MAX_LANGUAGE 32
 #define RADIO_MAX_CODE 16
-#define RADIO_API_BASE "https://de1.api.radio-browser.info"
-#define RADIO_API_BASE_HTTP "http://de1.api.radio-browser.info"
+#define RADIO_API_BASE "http://de1.api.radio-browser.info"
 
 /* A single radio station */
 typedef struct {
