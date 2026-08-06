@@ -134,7 +134,6 @@ jobs:
           curl -sSL -o /tmp/NotoSansSC.ttf \
             "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
           ls -la /tmp/NotoSansSC.ttf
-          file /tmp/NotoSansSC.ttf
 
           echo "=== Building BCFNT font with mkbcfnt ==="
           echo "Charlist: $(wc -w < scripts/charlist.txt) codepoints"
