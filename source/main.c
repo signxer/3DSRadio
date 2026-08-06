@@ -12,16 +12,18 @@
 #include "json.h"
 #include "locale.h"
 #include "stream_player.h"
+#include "ui_skin.h"
 
 /* ======================================================================
  * 3DSRadio - Flat Aero UI Design
- * Inspired by ClouDS-Music-FA
+ * Skin-based rendering powered by ClouDS-Music-FA texture atlas
  *
  * Design philosophy:
- * - Flat Aero: Nintendo 3DS system settings hierarchy × Apple Music whitespace
+ * - Texture atlas (ui-skin-dark.png) for all UI chrome
+ * - Nine-slice scaling for buttons, panels, headers, selections
  * - Top screen: content/art/visualization (hero)
  * - Bottom screen: navigation/lists/controls (functional)
- * - Dark mode with accent highlights, rounded corners, layered depth
+ * - Dark theme with skin-based depth and layered rendering
  * - Touch + button dual input
  * ====================================================================== */
 
@@ -40,36 +42,30 @@
  * Flat Aero Color Palette
  * ====================================================================== */
 
-/* Background layers */
+/* Background layers - deep dark for contrast with skin chrome */
 #define CLR_BG_TOP      0xFF1C1C2E  /* Deep navy top screen */
 #define CLR_BG_BOT      0xFF16162A  /* Slightly deeper bottom */
-#define CLR_SURFACE     0xFF2A2A40  /* Card/surface background */
-#define CLR_SURFACE_LT  0xFF353550  /* Lighter surface for hover */
+#define CLR_SURFACE     0xFF2A2A40  /* Card/surface background (fallback) */
+#define CLR_SURFACE_LT  0xFF353550  /* Lighter surface for hover (fallback) */
 
 /* Text */
 #define CLR_TEXT        0xFFF0F0F0  /* Primary text - near white */
 #define CLR_TEXT_SEC    0xFFA0A0B8  /* Secondary text - muted */
 #define CLR_TEXT_DIM    0xFF686880  /* Dim text - hints */
 
-/* Accent - derived from radio theme */
+/* Accent colors */
 #define CLR_ACCENT      0xFF5C9EFF  /* Soft blue accent */
 #define CLR_ACCENT2     0xFF7C5CFF  /* Purple secondary accent */
-#define CLR_ACCENT3     0xFFFF6B6B  /* Warm red accent for indicators */
-
-/* System UI - 3DS beige tones */
-#define CLR_SYS_BG      0xFFC8C0B0  /* Classic 3DS beige */
-#define CLR_SYS_BTN     0xFFE0D8C8  /* Button surface */
-#define CLR_SYS_BORDER  0xFFB0A898  /* Button border */
+#define CLR_ACCENT3     0xFFFF6B6B  /* Warm red accent */
 
 /* Status */
-#define CLR_OK          0xFF4CD964  /* iOS green */
-#define CLR_ERR         0xFFFF3B30  /* iOS red */
-#define CLR_WARN        0xFFFFCC00  /* iOS yellow */
-#define CLR_INFO         0xFF5AC8FA  /* iOS blue */
+#define CLR_OK          0xFF4CD964  /* Green */
+#define CLR_ERR         0xFFFF3B30  /* Red */
+#define CLR_WARN        0xFFFFCC00  /* Yellow */
+#define CLR_INFO        0xFF5AC8FA  /* Blue */
 
 /* Status bar */
 #define CLR_STATUSBAR   0xFF111122  /* Dark status bar */
-#define CLR_DIVIDER     0xFF3A3A50  /* Subtle divider */
 
 /* ======================================================================
  * UI State
@@ -84,7 +80,7 @@ typedef enum {
     SCREEN_STATION_INFO,
 } AppScreen;
 
-/* Menu items - loaded from locale */
+/* Menu items */
 #define MAIN_MENU_COUNT 4
 
 typedef struct {
@@ -120,8 +116,6 @@ typedef struct {
     u64 status_time;
 
     /* UI animation */
-    float highlight_alpha;
-    int highlight_dir;
     u32 frame_count;
 } App;
 
@@ -131,12 +125,24 @@ static App app;
 static C3D_RenderTarget *top = NULL;
 static C3D_RenderTarget *bottom = NULL;
 
+/* Skin */
+static UiSkin skin;
+
 /* ======================================================================
- * Drawing Primitives - Flat Aero Style
+ * Drawing Primitives - Skin-based Flat Aero Style
  * ====================================================================== */
 
 /* Pre-allocated text buffer for efficiency */
 static C2D_TextBuf global_text_buf = NULL;
+static C2D_Font active_font = NULL;
+
+/* Corner radius helpers matching ClouDS-Music-FA aero style */
+static float aero_corner(float h) {
+    if (h >= 56.0f) return 13.0f;
+    if (h >= 42.0f) return 11.0f;
+    if (h >= 32.0f) return 8.0f;
+    return 6.0f;
+}
 
 static void draw_begin_frame(void) {
     C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
@@ -162,34 +168,75 @@ static void clear_bottom(void) {
     C2D_TargetClear(bottom, CLR_BG_BOT);
 }
 
-/* Rounded rectangle - Flat Aero signature */
-static void draw_rounded_rect(float x, float y, float w, float h, float r, u32 color) {
-    if (r <= 0) {
-        C2D_DrawRectSolid(x, y, 0.5f, w, h, color);
-        return;
-    }
-    /* Core rectangle */
-    C2D_DrawRectSolid(x + r, y, 0.5f, w - r * 2, h, color);
-    C2D_DrawRectSolid(x, y + r, 0.5f, w, h - r * 2, color);
-    /* Corner circles */
-    C2D_DrawCircleSolid(x + r, y + r, 0.5f, r, color);
-    C2D_DrawCircleSolid(x + w - r, y + r, 0.5f, r, color);
-    C2D_DrawCircleSolid(x + r, y + h - r, 0.5f, r, color);
-    C2D_DrawCircleSolid(x + w - r, y + h - r, 0.5f, r, color);
-}
-
-/* Draw a card-style surface */
-static void draw_card(float x, float y, float w, float h, bool highlighted) {
-    u32 color = highlighted ? CLR_SURFACE_LT : CLR_SURFACE;
-    draw_rounded_rect(x, y, w, h, 6.0f, color);
-    if (highlighted) {
-        /* Glow effect on left edge */
-        C2D_DrawRectSolid(x, y + 4, 0.6f, 3.0f, h - 8, CLR_ACCENT);
+/* Draw a panel using 9-slice skin, with solid-color fallback */
+static void draw_panel(float x, float y, float w, float h) {
+    float corner = aero_corner(h);
+    bool ok = ui_skin_draw_nine_slice(&skin, UI_SKIN_PANEL,
+        x, y, 0.5f, w, h, 28U, corner);
+    if (!ok) {
+        /* Fallback: plain rounded rect */
+        if (corner > 0) {
+            C2D_DrawRectSolid(x + corner, y, 0.5f, w - corner * 2, h, CLR_SURFACE);
+            C2D_DrawRectSolid(x, y + corner, 0.5f, w, h - corner * 2, CLR_SURFACE);
+            C2D_DrawCircleSolid(x + corner, y + corner, 0.5f, corner, CLR_SURFACE);
+            C2D_DrawCircleSolid(x + w - corner, y + corner, 0.5f, corner, CLR_SURFACE);
+            C2D_DrawCircleSolid(x + corner, y + h - corner, 0.5f, corner, CLR_SURFACE);
+            C2D_DrawCircleSolid(x + w - corner, y + h - corner, 0.5f, corner, CLR_SURFACE);
+        } else {
+            C2D_DrawRectSolid(x, y, 0.5f, w, h, CLR_SURFACE);
+        }
     }
 }
 
-/* Gradient bar (top to bottom) */
-static void draw_gradient(float x, float y, float w, float h, u32 top_color, u32 bottom_color) {
+/* Draw a button using 9-slice skin, with highlight state */
+static void draw_button(float x, float y, float w, float h, bool active) {
+    float corner = aero_corner(h);
+    UiSkinAsset asset = active ? UI_SKIN_BUTTON_ACTIVE : UI_SKIN_BUTTON;
+    bool ok = ui_skin_draw_nine_slice(&skin, asset,
+        x, y, 0.5f, w, h, 20U, corner);
+    if (!ok) {
+        u32 color = active ? CLR_SURFACE_LT : CLR_SURFACE;
+        if (corner > 0) {
+            C2D_DrawRectSolid(x + corner, y, 0.5f, w - corner * 2, h, color);
+            C2D_DrawRectSolid(x, y + corner, 0.5f, w, h - corner * 2, color);
+            C2D_DrawCircleSolid(x + corner, y + corner, 0.5f, corner, color);
+            C2D_DrawCircleSolid(x + w - corner, y + corner, 0.5f, corner, color);
+            C2D_DrawCircleSolid(x + corner, y + h - corner, 0.5f, corner, color);
+            C2D_DrawCircleSolid(x + w - corner, y + h - corner, 0.5f, corner, color);
+        } else {
+            C2D_DrawRectSolid(x, y, 0.5f, w, h, color);
+        }
+    }
+    /* Active glow layer */
+    if (active) {
+        ui_skin_draw_nine_slice_tinted_alpha(&skin, UI_SKIN_BUTTON_PRESSED,
+            x, y, 0.55f, w, h, 20U, corner,
+            CLR_ACCENT, 0.78f, 0.6f);
+    }
+}
+
+/* Draw a selection row highlight */
+static void draw_selection(float x, float y, float w, float h) {
+    float corner = aero_corner(h);
+    bool ok = ui_skin_draw_nine_slice(&skin, UI_SKIN_SELECTION,
+        x, y, 0.5f, w, h, 16U, corner);
+    if (!ok) {
+        C2D_DrawRectSolid(x, y, 0.5f, w, h, CLR_SURFACE_LT);
+    }
+    /* Left edge accent bar */
+    C2D_DrawRectSolid(x, y + 2, 0.6f, 3.0f, h - 4, CLR_ACCENT);
+}
+
+/* Draw a header/title bar */
+static void draw_header(float x, float y, float w, float h) {
+    float corner = aero_corner(h);
+    ui_skin_draw_nine_slice(&skin, UI_SKIN_HEADER,
+        x, y, 0.5f, w, h, 12U, corner);
+}
+
+/* Gradient bar (top to bottom) - no skin equivalent, keep raw */
+static void draw_gradient(float x, float y, float w, float h,
+                          u32 top_color, u32 bottom_color) {
     for (int i = 0; i < (int)h; i++) {
         float t = (float)i / h;
         u8 r = (u8)(((top_color >> 24) & 0xFF) * (1-t) + ((bottom_color >> 24) & 0xFF) * t);
@@ -201,10 +248,9 @@ static void draw_gradient(float x, float y, float w, float h, u32 top_color, u32
     }
 }
 
-/* Draw text using global buffer. Uses Chinese font when available. */
-static C2D_Font active_font = NULL; /* Cached font reference */
-
-static void draw_label(float x, float y, float size, u32 color, const char *fmt, ...) {
+/* Draw text using global buffer with active font */
+static void draw_label(float x, float y, float size, u32 color,
+                       const char *fmt, ...) {
     char buf[256];
     va_list args;
     va_start(args, fmt);
@@ -214,7 +260,6 @@ static void draw_label(float x, float y, float size, u32 color, const char *fmt,
     C2D_Text c2d_text;
     C2D_TextBufClear(global_text_buf);
 
-    /* Use Chinese BCFNT font if loaded, otherwise fall back to system font */
     if (active_font) {
         C2D_TextFontParse(&c2d_text, active_font, global_text_buf, buf);
     } else {
@@ -225,20 +270,21 @@ static void draw_label(float x, float y, float size, u32 color, const char *fmt,
     C2D_DrawText(&c2d_text, C2D_WithColor, x, y, 0.5f, size, size, color);
 }
 
-/* Status bar at bottom of each screen */
+/* Status bar at bottom of top screen */
 static void draw_status_bar(void) {
     select_top();
-    draw_rounded_rect(0, TOP_HEIGHT - 20, TOP_WIDTH, 20, 0, CLR_STATUSBAR);
+    ui_skin_draw_nine_slice(&skin, UI_SKIN_FOOTER,
+        0, TOP_HEIGHT - 20, 0.5f, TOP_WIDTH, 20, 8U, 4.0f);
+    if (!skin.ready) {
+        C2D_DrawRectSolid(0, TOP_HEIGHT - 20, 0.5f, TOP_WIDTH, 20, CLR_STATUSBAR);
+    }
 
-    /* Time placeholder */
     draw_label(10, TOP_HEIGHT - 18, 0.4f, CLR_TEXT_DIM, "3DSRadio v1.0");
 
-    /* WiFi indicator */
     const char *wifi = net_wifi_status() ? "\x01 Wi-Fi" : "\x02 No Wi-Fi";
     u32 wifi_color = net_wifi_status() ? CLR_OK : CLR_ERR;
     draw_label(TOP_WIDTH - 90, TOP_HEIGHT - 18, 0.4f, wifi_color, wifi);
 
-    /* Status text in center */
     if (strlen(app.status_text) > 0) {
         u64 now = svcGetSystemTick();
         u64 elapsed = (now - app.status_time) / CPU_TICKS_PER_MSEC;
@@ -246,7 +292,6 @@ static void draw_status_bar(void) {
             float alpha = 1.0f;
             if (elapsed > 3000) alpha = 1.0f - (float)(elapsed - 3000) / 1000.0f;
             u32 c = app.status_color;
-            /* Apply alpha by modifying the alpha channel */
             u8 a = (u8)((c & 0xFF) * alpha);
             c = (c & 0xFFFFFF00) | a;
             draw_label(150, TOP_HEIGHT - 18, 0.4f, c, "%s", app.status_text);
@@ -257,7 +302,6 @@ static void draw_status_bar(void) {
 /* Top screen hero header */
 static void draw_hero_header(const char *title, const char *subtitle) {
     select_top();
-    /* Gradient header area */
     draw_gradient(0, 0, TOP_WIDTH, 60, 0x2A2A44FF, 0x1C1C2E00);
 
     draw_label(20, 10, 0.9f, CLR_TEXT, "%s", title);
@@ -274,11 +318,11 @@ static void render_main_menu(void) {
     select_top();
     clear_top();
 
-    /* Hero area */
+    /* Hero area with gradient */
     draw_gradient(0, 0, TOP_WIDTH, 120, 0x25253DFF, 0x1C1C2E00);
 
-    /* App logo area */
-    draw_rounded_rect(TOP_WIDTH/2 - 50, 25, 100, 100, 16, CLR_SURFACE_LT);
+    /* App logo area using panel skin */
+    draw_panel(TOP_WIDTH/2 - 50, 25, 100, 100);
     draw_label(TOP_WIDTH/2 - 30, 55, 1.8f, CLR_ACCENT, "R");
 
     /* Title */
@@ -300,7 +344,7 @@ static void render_main_menu(void) {
         int y = 35 + i * 48;
         bool sel = (i == app.selection);
 
-        draw_card(10, y, BOT_WIDTH - 20, 40, sel);
+        draw_button(10, y, BOT_WIDTH - 20, 40, sel);
 
         if (sel) {
             C2D_DrawRectSolid(10, y, 0.6f, 3, 40, CLR_ACCENT);
@@ -335,8 +379,7 @@ static void render_tag_list(void) {
         bool sel = (i == app.selection);
 
         if (sel) {
-            draw_rounded_rect(5, y - 2, BOT_WIDTH - 10, 18, 4, CLR_SURFACE_LT);
-            C2D_DrawRectSolid(5, y, 0.6f, 3, 14, CLR_ACCENT);
+            draw_selection(5, y - 2, BOT_WIDTH - 10, 18);
         }
 
         char label[128];
@@ -348,8 +391,8 @@ static void render_tag_list(void) {
         draw_label(BOT_WIDTH - 50, y, 0.35f, CLR_TEXT_DIM, "%s", count_str);
     }
 
-    /* Hint bar */
-    draw_rounded_rect(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18, 4, CLR_SURFACE);
+    /* Hint bar using footer skin */
+    draw_panel(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18);
     draw_label(12, BOT_HEIGHT - 20, 0.35f, CLR_TEXT_DIM,
                "\x1E \x1F Navigate   A Select   B Back");
 
@@ -376,8 +419,7 @@ static void render_station_list(void) {
         bool sel = (i == app.selection);
 
         if (sel) {
-            draw_rounded_rect(3, y, BOT_WIDTH - 6, 20, 4, CLR_SURFACE_LT);
-            C2D_DrawRectSolid(3, y, 0.6f, 3, 20, CLR_ACCENT);
+            draw_selection(3, y, BOT_WIDTH - 6, 20);
         }
 
         RadioStation *s = &app.stations[i];
@@ -396,15 +438,18 @@ static void render_station_list(void) {
         }
         draw_label(12, y + 1, 0.4f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", name_buf);
 
-        /* Bitrate + codec badge */
+        /* Bitrate + codec badge using skin dot */
         if (s->bitrate > 0) {
             char badge[16];
             snprintf(badge, sizeof(badge), "%d kbps", s->bitrate);
+            /* Small accent dot before bitrate */
+            ui_skin_draw_tinted(&skin, UI_SKIN_DOT_CYAN,
+                BOT_WIDTH - 72, y + 3, 0.55f, 10, 10, CLR_ACCENT);
             draw_label(BOT_WIDTH - 60, y + 1, 0.3f, CLR_ACCENT, "%s", badge);
         }
     }
 
-    draw_rounded_rect(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18, 4, CLR_SURFACE);
+    draw_panel(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18);
     draw_label(12, BOT_HEIGHT - 20, 0.35f, CLR_TEXT_DIM,
                "\x1E \x1F Browse   A Play   Y Info   B Back");
 
@@ -424,10 +469,9 @@ static void render_playing(void) {
     /* Large station name at top */
     draw_label(20, 30, 1.2f, CLR_TEXT, "%s", app.current_station->name);
 
-    /* Tags as chips */
+    /* Tags as chips using skin button */
     if (strlen(app.current_station->tags) > 0) {
         char first_tag[32] = {0};
-        /* Extract first tag */
         const char *comma = strchr(app.current_station->tags, ',');
         if (comma) {
             size_t len = (size_t)(comma - app.current_station->tags);
@@ -437,8 +481,9 @@ static void render_playing(void) {
             strncpy(first_tag, app.current_station->tags, 20);
         }
         if (strlen(first_tag) > 0) {
-            draw_rounded_rect(20, 65, strlen(first_tag) * 6 + 16, 18, 9, CLR_ACCENT);
-            draw_label(28, 67, 0.4f, CLR_TEXT, "%s", first_tag);
+            float tag_w = strlen(first_tag) * 6.0f + 16.0f;
+            draw_button(20, 62, tag_w, 22, false);
+            draw_label(28, 65, 0.4f, CLR_TEXT, "%s", first_tag);
         }
     }
 
@@ -470,12 +515,10 @@ static void render_playing(void) {
     int base_y = 155;
 
     for (int i = 0; i < bar_count; i++) {
-        /* Pseudo-animated heights using frame count and sin */
         float phase = (float)(i * 3 + app.frame_count * 2);
         float height = 8.0f + sinf(phase * 0.1f) * 15.0f + sinf(phase * 0.05f) * 8.0f;
         if (!app.is_playing) height = 2.0f;
 
-        /* Color gradient across bars */
         float t = (float)i / bar_count;
         u8 r = (u8)((1-t) * 0x5C + t * 0x7C);
         u8 g = (u8)((1-t) * 0x9E + t * 0x5C);
@@ -487,8 +530,12 @@ static void render_playing(void) {
                           bar_width, height, bar_color);
     }
 
-    /* Playing/Paused indicator */
-    draw_label(20, TOP_HEIGHT - 45, 0.5f,
+    /* Playing/Paused indicator with skin dot */
+    ui_skin_draw_tinted(&skin,
+        app.is_playing ? UI_SKIN_DOT_GREEN : UI_SKIN_DOT_ORANGE,
+        20, TOP_HEIGHT - 48, 0.55f, 12, 12,
+        app.is_playing ? CLR_OK : CLR_WARN);
+    draw_label(38, TOP_HEIGHT - 45, 0.5f,
                app.is_playing ? CLR_OK : CLR_WARN,
                app.is_playing ? "\x01 Now Playing" : "\x02 Paused");
 
@@ -496,13 +543,18 @@ static void render_playing(void) {
     draw_label(TOP_WIDTH - 80, TOP_HEIGHT - 45, 0.35f, CLR_TEXT_DIM,
                "Vol: %.0f%%", app.volume * 100);
 
+    /* Progress bar using skin */
+    select_top();
+    ui_skin_draw_nine_slice(&skin, UI_SKIN_PROGRESS,
+        20, TOP_HEIGHT - 32, 0.5f, TOP_WIDTH - 40, 6, 4U, 2.0f);
+
     /* Bottom screen: controls */
     select_bottom();
     clear_bottom();
 
     draw_label(15, 12, 0.5f, CLR_TEXT_SEC, "%s", tr_controls());
 
-    /* Control buttons as cards */
+    /* Control buttons as skin-based buttons */
     struct { const char *label; const char *key; u32 color; } controls[] = {
         {tr_play_pause(), "A", CLR_ACCENT},
         {tr_stop_back(), "B", CLR_ACCENT3},
@@ -513,13 +565,12 @@ static void render_playing(void) {
     for (int i = 0; i < 4; i++) {
         int x = 8 + i * 78;
         int y = 45;
-        draw_rounded_rect(x, y, 72, 55, 8, CLR_SURFACE);
-        C2D_DrawRectSolid(x, y + 10, 0.6f, 72, 1, CLR_DIVIDER);
+        draw_button(x, y, 72, 55, false);
         draw_label(x + 10, y + 18, 0.55f, controls[i].color, "%s", controls[i].key);
         draw_label(x + 10, y + 38, 0.35f, CLR_TEXT_DIM, "%s", controls[i].label);
     }
 
-    /* Stream info */
+    /* Stream info panel */
     if (strlen(app.stream_url) > 0) {
         char url_display[48];
         size_t len = strlen(app.stream_url);
@@ -532,7 +583,7 @@ static void render_playing(void) {
         } else {
             strcpy(url_display, app.stream_url);
         }
-        draw_rounded_rect(8, 120, BOT_WIDTH - 16, 35, 6, CLR_SURFACE);
+        draw_panel(8, 120, BOT_WIDTH - 16, 35);
         draw_label(15, 128, 0.3f, CLR_TEXT_DIM, "%s", tr_stream_url());
         draw_label(15, 140, 0.3f, CLR_ACCENT, "%s", url_display);
     }
@@ -550,15 +601,15 @@ static void render_search(void) {
     select_bottom();
     clear_bottom();
 
-    /* Search input area */
-    draw_rounded_rect(10, 20, BOT_WIDTH - 20, 40, 8, CLR_SURFACE);
+    /* Search input area using panel */
+    draw_panel(10, 20, BOT_WIDTH - 20, 40);
     draw_label(20, 28, 0.35f, CLR_TEXT_DIM, "%s", tr_search_prompt());
     draw_label(20, 42, 0.5f, CLR_ACCENT,
                strlen(app.search_query) > 0 ? "%s_" : "Type a station name...",
                app.search_query);
 
-    /* Hint */
-    draw_rounded_rect(10, 80, BOT_WIDTH - 20, 55, 8, CLR_SURFACE);
+    /* Hint panel */
+    draw_panel(10, 80, BOT_WIDTH - 20, 55);
     draw_label(20, 88, 0.35f, CLR_TEXT_DIM, "%s", tr_search_prompt());
     draw_label(20, 102, 0.35f, CLR_TEXT_DIM, "%s", tr_search_action());
     draw_label(20, 116, 0.35f, CLR_TEXT_DIM, "%s", tr_back());
@@ -583,8 +634,8 @@ static void render_station_info(void) {
 
     draw_label(20, 20, 0.8f, CLR_TEXT, "%s", tr_station_info());
 
-    /* Info card */
-    draw_rounded_rect(10, 50, TOP_WIDTH - 20, 160, 8, CLR_SURFACE);
+    /* Info card using panel skin */
+    draw_panel(10, 50, TOP_WIDTH - 20, 160);
 
     int y = 60;
     draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_name());
@@ -621,19 +672,32 @@ static void render_station_info(void) {
 
     /* Tags section */
     if (strlen(s->tags) > 0) {
-        draw_rounded_rect(8, 40, BOT_WIDTH - 16, 50, 6, CLR_SURFACE);
+        draw_panel(8, 40, BOT_WIDTH - 16, 50);
         draw_label(15, 46, 0.35f, CLR_TEXT_DIM, "%s", tr_tags());
         draw_label(15, 60, 0.4f, CLR_ACCENT, "%s", s->tags);
     }
 
-    draw_rounded_rect(8, BOT_HEIGHT - 40, BOT_WIDTH - 16, 32, 6, CLR_SURFACE);
+    /* Back button */
+    draw_panel(8, BOT_HEIGHT - 40, BOT_WIDTH - 16, 32);
     draw_label(15, BOT_HEIGHT - 35, 0.4f, CLR_TEXT_DIM, "%s", tr_back());
 
     draw_status_bar();
 }
 
-/* Forward declarations for functions used in handle_input */
-static void set_status(const char *fmt, u32 color, ...);
+/* ======================================================================
+ * Application Logic
+ * ====================================================================== */
+
+static void set_status(const char *fmt, u32 color, ...) {
+    va_list args;
+    va_start(args, color);
+    vsnprintf(app.status_text, sizeof(app.status_text), fmt, args);
+    va_end(args);
+    app.status_color = color;
+    app.status_time = svcGetSystemTick();
+}
+
+/* Forward declarations */
 static void load_tags(void);
 static void load_top_stations(void);
 static void load_stations_by_tag(const char *tag);
@@ -657,13 +721,11 @@ static void handle_input(void) {
             if (kDown & KEY_UP)
                 app.selection = (app.selection - 1 + MAIN_MENU_COUNT) % MAIN_MENU_COUNT;
 
-            /* Touch selection for menu items */
             if (touch_active && touch.py >= 35 && touch.py <= 35 + MAIN_MENU_COUNT * 48) {
                 int idx = (touch.py - 35) / 48;
                 if (idx >= 0 && idx < MAIN_MENU_COUNT) {
                     app.selection = idx;
                     if (touch.px >= 10 && touch.px <= BOT_WIDTH - 10) {
-                        /* Act as A press */
                         kDown |= KEY_A;
                     }
                 }
@@ -679,7 +741,7 @@ static void handle_input(void) {
                         app.screen = SCREEN_SEARCH;
                         break;
                     case 3:
-                        set_status("3DSRadio v1.0 - Flat Aero Design", CLR_INFO);
+                        set_status("3DSRadio v1.0 - Skin-powered UI", CLR_INFO);
                         break;
                 }
             }
@@ -701,7 +763,6 @@ static void handle_input(void) {
                         app.scroll_offset--;
                 }
             }
-            /* Touch */
             if (touch_active && touch.py >= 28) {
                 int idx = (touch.py - 28) / 20 + app.scroll_offset;
                 if (idx >= 0 && idx < app.tag_count) {
@@ -734,7 +795,6 @@ static void handle_input(void) {
                         app.scroll_offset--;
                 }
             }
-            /* Touch */
             if (touch_active && touch.py >= 5) {
                 int idx = (touch.py - 5) / 22 + app.scroll_offset;
                 if (idx >= 0 && idx < app.station_count) {
@@ -786,7 +846,6 @@ static void handle_input(void) {
                     stream_player_set_volume(app.stream_player, app.volume);
                 set_status("Volume: %.0f%%", CLR_INFO, app.volume * 100);
             }
-            /* Touch on control cards */
             if (touch_active && touch.py >= 45 && touch.py <= 100) {
                 int idx = (touch.px - 8) / 78;
                 if (idx >= 0 && idx < 4) {
@@ -856,17 +915,8 @@ static void handle_input(void) {
 }
 
 /* ======================================================================
- * Application Logic
+ * Data Loading Functions
  * ====================================================================== */
-
-static void set_status(const char *fmt, u32 color, ...) {
-    va_list args;
-    va_start(args, color);
-    vsnprintf(app.status_text, sizeof(app.status_text), fmt, args);
-    va_end(args);
-    app.status_color = color;
-    app.status_time = svcGetSystemTick();
-}
 
 static void load_tags(void) {
     if (!net_wifi_status()) {
@@ -940,7 +990,6 @@ static void play_station(int index) {
     set_status("Connecting to stream...", CLR_INFO);
 
     char error[128];
-    /* Try to get stream URL from API first */
     int ret = radio_get_stream_url(app.current_station->stationuuid,
                                     app.stream_url, sizeof(app.stream_url),
                                     error, sizeof(error));
@@ -959,7 +1008,6 @@ static void play_station(int index) {
         }
     }
 
-    /* Start streaming via the stream player */
     if (app.stream_player) {
         stream_player_stop(app.stream_player);
         int r = stream_player_play(app.stream_player, play_url);
@@ -1002,24 +1050,29 @@ int main(void) {
         active_font = locale_get_font();
     }
 
+    /* Load UI skin texture atlas */
+    ui_skin_init(&skin);
+    if (!ui_skin_load(&skin, "romfs:/ui-skin-dark.png")) {
+        /* Skin load failed — will use solid-color fallbacks throughout */
+        set_status("Skin not loaded, using fallback rendering", CLR_WARN);
+    }
+
     /* App state */
     memset(&app, 0, sizeof(app));
     app.screen = SCREEN_MAIN_MENU;
     app.volume = 0.8f;
-    app.highlight_alpha = 0.3f;
-    app.highlight_dir = 1;
 
     set_status("Welcome to 3DSRadio", CLR_INFO);
-	app.stream_player = stream_player_create();
+    app.stream_player = stream_player_create();
 
     /* Main loop */
     while (aptMainLoop()) {
         hidScanInput();
-	/* Update audio playback */
-	if (app.stream_player) {
-	    stream_player_update(app.stream_player);
-	    app.is_playing = stream_player_is_playing(app.stream_player);
-	}
+        /* Update audio playback */
+        if (app.stream_player) {
+            stream_player_update(app.stream_player);
+            app.is_playing = stream_player_is_playing(app.stream_player);
+        }
         handle_input();
 
         app.frame_count++;
@@ -1040,6 +1093,8 @@ int main(void) {
     }
 
     /* Cleanup */
+    stream_player_destroy(app.stream_player);
+    ui_skin_clear(&skin);
     radio_exit();
     net_exit();
     romfsExit();

@@ -137,7 +137,7 @@ jobs:
 
           echo "=== Building BCFNT font with mkbcfnt ==="
           echo "Charlist: $(wc -w < scripts/charlist.txt) codepoints"
-          mkbcfnt -o romfs/chinese.bcfnt -s 16 \
+          mkbcfnt -o romfs/chinese.bcfnt -s 22 \
             -w scripts/charlist.txt /tmp/NotoSansSC.ttf
 
           ls -la romfs/chinese.bcfnt
