@@ -129,16 +129,17 @@ jobs:
       - name: Download CJK font and build BCFNT
         run: |
           echo "=== Downloading Noto Sans SC CJK font ==="
-          # Noto Sans SC Regular (SIL Open Font License 1.1 - freely redistributable)
-          curl -sSL -o /tmp/NotoSansSC-Regular.ttf \
-            "https://github.com/google/fonts/raw/main/ofl/notosanssc/static/NotoSansSC-Regular.ttf"
-          ls -la /tmp/NotoSansSC-Regular.ttf
+          # Noto Sans SC variable font (SIL Open Font License 1.1 - freely redistributable)
+          # Note: static/ variants don't exist in the Google Fonts repo
+          curl -sSL -o /tmp/NotoSansSC.ttf \
+            "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
+          ls -la /tmp/NotoSansSC.ttf
+          file /tmp/NotoSansSC.ttf
 
           echo "=== Building BCFNT font with mkbcfnt ==="
-          # -s 16: font size 16px (good for 3DS screen)
-          # -w: whitelist file with codepoints (format: U+4E2D U+56FD ...)
+          echo "Charlist: $(wc -w < scripts/charlist.txt) codepoints"
           mkbcfnt -o romfs/chinese.bcfnt -s 16 \
-            -w scripts/charlist.txt /tmp/NotoSansSC-Regular.ttf
+            -w scripts/charlist.txt /tmp/NotoSansSC.ttf
 
           ls -la romfs/chinese.bcfnt
           echo "BCFNT font built successfully"
