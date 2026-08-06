@@ -211,7 +211,7 @@ static void draw_button(float x, float y, float w, float h, bool active) {
     /* Active glow layer */
     if (active) {
         ui_skin_draw_nine_slice_tinted_alpha(&skin, UI_SKIN_BUTTON_PRESSED,
-            x, y, 0.55f, w, h, 20U, corner,
+            x, y, 0.5f, w, h, 20U, corner,
             CLR_ACCENT, 0.78f, 0.6f);
     }
 }
@@ -225,7 +225,7 @@ static void draw_selection(float x, float y, float w, float h) {
         C2D_DrawRectSolid(x, y, 0.5f, w, h, CLR_SURFACE_LT);
     }
     /* Left edge accent bar */
-    C2D_DrawRectSolid(x, y + 2, 0.6f, 3.0f, h - 4, CLR_ACCENT);
+    C2D_DrawRectSolid(x, y + 2, 0.5f, 3.0f, h - 4, CLR_ACCENT);
 }
 
 /* Draw a header/title bar */
@@ -268,10 +268,11 @@ static void draw_label(float x, float y, float size, u32 color,
     }
 
     C2D_TextOptimize(&c2d_text);
-    /* z=0.45f ensures text renders on top of nine-slice backgrounds at z=0.5f.
-     * In citro2d's depth-sorted pipeline, smaller z = closer to the camera,
-     * so text will never be obscured by selection highlights or buttons. */
-    C2D_DrawText(&c2d_text, C2D_WithColor, x, y, 0.45f, size, size, color);
+    /* All UI elements share z=0.5f. PICA200 GPU uses GPU_GEQUAL depth
+     * test — LARGER z passes, smaller z is rejected. Render order
+     * (bg → glow → accent → text) controls layering. Never use
+     * z != 0.5f without checking depth test direction. */
+    C2D_DrawText(&c2d_text, C2D_WithColor, x, y, 0.5f, size, size, color);
 }
 
 /* Status bar at bottom of top screen */
@@ -355,7 +356,7 @@ static void render_main_menu(void) {
         draw_button(10, y, BOT_WIDTH - 20, 40, sel);
 
         if (sel) {
-            C2D_DrawRectSolid(10, y, 0.6f, 3, 40, CLR_ACCENT);
+            C2D_DrawRectSolid(10, y, 0.5f, 3, 40, CLR_ACCENT);
         }
 
         draw_label(22, y + 10, 0.55f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", items[i]);
@@ -456,7 +457,7 @@ static void render_station_list(void) {
             snprintf(badge, sizeof(badge), "%d kbps", s->bitrate);
             /* Small accent dot before bitrate */
             ui_skin_draw_tinted(&skin, UI_SKIN_DOT_CYAN,
-                BOT_WIDTH - 72, y + 3, 0.55f, 10, 10, CLR_ACCENT);
+                BOT_WIDTH - 72, y + 3, 0.5f, 10, 10, CLR_ACCENT);
             draw_label(BOT_WIDTH - 60, y + 1, 0.3f, CLR_ACCENT, "%s", badge);
         }
     }
@@ -543,7 +544,7 @@ static void render_playing(void) {
     /* Playing/Paused indicator with skin dot */
     ui_skin_draw_tinted(&skin,
         app.is_playing ? UI_SKIN_DOT_GREEN : UI_SKIN_DOT_ORANGE,
-        20, TOP_HEIGHT - 48, 0.55f, 12, 12,
+        20, TOP_HEIGHT - 48, 0.5f, 12, 12,
         app.is_playing ? CLR_OK : CLR_WARN);
     draw_label(38, TOP_HEIGHT - 45, 0.5f,
                app.is_playing ? CLR_OK : CLR_WARN,
