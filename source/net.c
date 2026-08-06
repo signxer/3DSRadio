@@ -109,6 +109,10 @@ void net_exit(void) {
 }
 
 bool net_wifi_status(void) {
+    /* In emulators, ACU_GetWifiStatus may return 0 even when networking works.
+     * If SOC is initialized, assume network is available. */
+    if (net_initialized) return true;
+
     u32 wifi_status = 0;
     ACU_GetWifiStatus(&wifi_status);
     return wifi_status != 0;

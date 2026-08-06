@@ -9,15 +9,29 @@
 
 /* ======================================================================
  * Radio-browser.info API client implementation
+ * Supports multiple API mirrors with automatic failover
  * ====================================================================== */
 
 #define JSON_TOKEN_CAPACITY 1024
-#define TAG_LIST_URL RADIO_API_BASE "/json/tags?limit=50&order=stationcount&reverse=true&hidebroken=true"
-#define TAG_STATIONS_URL RADIO_API_BASE "/json/stations/bytagexact/%s?limit=%d&order=clickcount&reverse=true&hidebroken=true"
-#define TOPCLICK_URL RADIO_API_BASE "/json/stations/topclick/%d?hidebroken=true"
-#define COUNTRY_STATIONS_URL RADIO_API_BASE "/json/stations/bycountrycodeexact/%s?limit=%d&order=clickcount&reverse=true&hidebroken=true"
-#define SEARCH_URL RADIO_API_BASE "/json/stations/search?name=%s&limit=%d&order=clickcount&reverse=true&hidebroken=true"
-#define STREAM_URL RADIO_API_BASE "/json/url/%s"
+
+/* API server mirrors - tried in order, first working one wins */
+static const char *API_SERVERS[] = {
+    "de1.api.radio-browser.info",
+    "de2.api.radio-browser.info",
+    "nl1.api.radio-browser.info",
+    "at1.api.radio-browser.info",
+    "all.api.radio-browser.info",
+};
+#define NUM_API_SERVERS 5
+static int current_server = 0; /* Last working server index */
+
+/* API path templates - {server} gets replaced at runtime */
+#define TAG_LIST_PATH       "/json/tags?limit=50&order=stationcount&reverse=true&hidebroken=true"
+#define TAG_STATIONS_PATH   "/json/stations/bytagexact/%s?limit=%d&order=clickcount&reverse=true&hidebroken=true"
+#define TOPCLICK_PATH       "/json/stations/topclick/%d?hidebroken=true"
+#define COUNTRY_STATIONS_PATH "/json/stations/bycountrycodeexact/%s?limit=%d&order=clickcount&reverse=true&hidebroken=true"
+#define SEARCH_PATH         "/json/stations/search?name=%s&limit=%d&order=clickcount&reverse=true&hidebroken=true"
+#define STREAM_PATH         "/json/url/%s"
 
 static char user_agent[64];
 static bool initialized = false;
@@ -25,6 +39,46 @@ static bool initialized = false;
 void radio_init(void) {
     snprintf(user_agent, sizeof(user_agent), "3DSRadio/1.0");
     initialized = true;
+}
+
+/* Build a full URL from a server hostname and path */
+static void build_url(const char *server, const char *path, char *url, size_t size) {
+    snprintf(url, size, "http://%s%s", server, path);
+}
+
+/* HTTP GET with automatic server failover.
+ * Tries current_server first, then falls back to others.
+ * On success, updates current_server to the working one. */
+static int radio_http_get(const char *path, char **buffer, size_t *buffer_size,
+                          char *error, size_t error_size) {
+    char last_error[256] = {0};
+    int last_ret = NET_OK;
+
+    /* Try current (last known good) server first */
+    int start = current_server;
+    for (int i = 0; i < NUM_API_SERVERS; i++) {
+        int idx = (start + i) % NUM_API_SERVERS;
+        char url[512];
+        build_url(API_SERVERS[idx], path, url, sizeof(url));
+
+        int ret = net_get(url, buffer, buffer_size, last_error, sizeof(last_error));
+        if (ret == NET_OK && *buffer && *buffer_size > 0) {
+            /* Success - remember this server for next time */
+            current_server = idx;
+            return NET_OK;
+        }
+        last_ret = ret;
+        /* Brief pause between server attempts */
+        if (i < NUM_API_SERVERS - 1) {
+            svcSleepThread(50000000LL); /* 50ms */
+        }
+    }
+
+    if (error) {
+        snprintf(error, error_size, "All servers failed (last: %s)",
+                 last_error[0] ? last_error : "transport error");
+    }
+    return last_ret;
 }
 
 /* URL-encode a string (simplified - handles spaces and basic chars) */
@@ -181,8 +235,8 @@ static int station_visitor(const JsonDoc *doc, void *userdata) {
     return 0;
 }
 
-/* Fetch and parse a list of stations from a URL, with HTTP fallback */
-static int fetch_stations(const char *url, RadioStation *stations, int max_stations,
+/* Fetch and parse a list of stations from a path, with server failover */
+static int fetch_stations(const char *path, RadioStation *stations, int max_stations,
                            char *error, size_t error_size) {
     if (!initialized) {
         snprintf(error, error_size, "Radio API not initialized");
@@ -192,25 +246,11 @@ static int fetch_stations(const char *url, RadioStation *stations, int max_stati
     char *response = NULL;
     size_t response_size = 0;
 
-    int ret = net_get(url, &response, &response_size, error, error_size);
+    int ret = radio_http_get(path, &response, &response_size, error, error_size);
     if (ret != NET_OK) {
-        /* If HTTPS fails with TLS error, try HTTP fallback */
-        if (ret == NET_ERROR_TLS_VERIFY) {
-            /* Replace https:// with http:// in URL */
-            char http_url[512];
-            if (strncmp(url, "https://", 8) == 0) {
-                snprintf(http_url, sizeof(http_url), "http://%s", url + 8);
-                free(response);
-                response = NULL;
-                response_size = 0;
-                ret = net_get(http_url, &response, &response_size, error, error_size);
-            }
-        }
-        if (ret != NET_OK) {
-            if (error && !error[0])
-                snprintf(error, error_size, "HTTP error: %d", ret);
-            return -1;
-        }
+        if (error && !error[0])
+            snprintf(error, error_size, "HTTP error: %d", ret);
+        return -1;
     }
 
     if (!response || response_size == 0) {
@@ -240,17 +280,17 @@ static int fetch_stations(const char *url, RadioStation *stations, int max_stati
     return data.count;
 }
 
-/* Helper: URL-encode a tag and build the station URL */
+/* Helper: URL-encode a param and build the station path */
 static int fetch_stations_by_param(const char *pattern, const char *param,
                                     RadioStation *stations, int max_stations,
                                     char *error, size_t error_size) {
     char encoded_param[256];
     url_encode(param, encoded_param, sizeof(encoded_param));
 
-    char url[512];
-    snprintf(url, sizeof(url), pattern, encoded_param, max_stations);
+    char path[512];
+    snprintf(path, sizeof(path), pattern, encoded_param, max_stations);
 
-    return fetch_stations(url, stations, max_stations, error, error_size);
+    return fetch_stations(path, stations, max_stations, error, error_size);
 }
 
 int radio_fetch_tags(RadioTag *tags, int max_tags,
@@ -263,21 +303,10 @@ int radio_fetch_tags(RadioTag *tags, int max_tags,
     char *response = NULL;
     size_t response_size = 0;
 
-    int ret = net_get(TAG_LIST_URL, &response, &response_size, error, error_size);
+    int ret = radio_http_get(TAG_LIST_PATH, &response, &response_size, error, error_size);
     if (ret != NET_OK) {
-        /* Fallback to HTTP if HTTPS fails with TLS error */
-        if (ret == NET_ERROR_TLS_VERIFY) {
-            const char *http_url = TAG_LIST_URL + 0;
-            /* Build HTTP URL manually */
-            char http_url_buf[512];
-            snprintf(http_url_buf, sizeof(http_url_buf), "http://de1.api.radio-browser.info/json/tags?limit=50&order=stationcount&reverse=true&hidebroken=true");
-            free(response); response = NULL; response_size = 0;
-            ret = net_get(http_url_buf, &response, &response_size, error, error_size);
-        }
-        if (ret != NET_OK) {
-            if (error) snprintf(error, error_size, "HTTP error: %d", ret);
-            return -1;
-        }
+        if (error) snprintf(error, error_size, "HTTP error: %d", ret);
+        return -1;
     }
 
     if (!response || response_size == 0) {
@@ -322,26 +351,26 @@ int radio_fetch_tags(RadioTag *tags, int max_tags,
 
 int radio_fetch_by_tag(const char *tag, RadioStation *stations, int max_stations,
                         char *error, size_t error_size) {
-    return fetch_stations_by_param(TAG_STATIONS_URL, tag, stations, max_stations,
+    return fetch_stations_by_param(TAG_STATIONS_PATH, tag, stations, max_stations,
                                     error, error_size);
 }
 
 int radio_fetch_topclick(RadioStation *stations, int max_stations,
                           char *error, size_t error_size) {
-    char url[256];
-    snprintf(url, sizeof(url), TOPCLICK_URL, max_stations);
-    return fetch_stations(url, stations, max_stations, error, error_size);
+    char path[256];
+    snprintf(path, sizeof(path), TOPCLICK_PATH, max_stations);
+    return fetch_stations(path, stations, max_stations, error, error_size);
 }
 
 int radio_fetch_by_country(const char *country, RadioStation *stations,
                             int max_stations, char *error, size_t error_size) {
-    return fetch_stations_by_param(COUNTRY_STATIONS_URL, country, stations,
+    return fetch_stations_by_param(COUNTRY_STATIONS_PATH, country, stations,
                                     max_stations, error, error_size);
 }
 
 int radio_search_by_name(const char *name, RadioStation *stations,
                           int max_stations, char *error, size_t error_size) {
-    return fetch_stations_by_param(SEARCH_URL, name, stations, max_stations,
+    return fetch_stations_by_param(SEARCH_PATH, name, stations, max_stations,
                                     error, error_size);
 }
 
@@ -349,13 +378,13 @@ int radio_get_stream_url(const char *stationuuid, char *url, size_t url_size,
                           char *error, size_t error_size) {
     if (!initialized || !stationuuid || !url) return -1;
 
-    char api_url[256];
-    snprintf(api_url, sizeof(api_url), STREAM_URL, stationuuid);
+    char path[256];
+    snprintf(path, sizeof(path), STREAM_PATH, stationuuid);
 
     char *response = NULL;
     size_t response_size = 0;
 
-    int ret = net_get(api_url, &response, &response_size, error, error_size);
+    int ret = radio_http_get(path, &response, &response_size, error, error_size);
     if (ret != NET_OK) {
         if (error) snprintf(error, error_size, "HTTP error: %d", ret);
         return -1;
