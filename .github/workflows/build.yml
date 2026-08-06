@@ -93,11 +93,52 @@ jobs:
           print('Assets generated')
           EOF
 
-      - name: Download Chinese font (BCFNT)
+      - name: Extract Chinese character list
         run: |
-          curl -sSL -o romfs/chinese.bcfnt \
-            "https://raw.githubusercontent.com/Epic0522/ClouDS-Music-FA/clouds-music-fa/romfs/ui-menu-font.bcfnt"
+          python3 << 'PYEOF'
+          import os
+          all_chars = set()
+          for d in ['source', 'include']:
+              if not os.path.isdir(d): continue
+              for f in os.listdir(d):
+                  if not f.endswith(('.c', '.h')): continue
+                  with open(os.path.join(d, f), 'r', encoding='utf-8') as fh:
+                      text = fh.read()
+                  for ch in text:
+                      cp = ord(ch)
+                      if (0x4E00 <= cp <= 0x9FFF or
+                          0x3400 <= cp <= 0x4DBF or
+                          0xF900 <= cp <= 0xFAFF or
+                          0x3000 <= cp <= 0x303F or
+                          0xFF00 <= cp <= 0xFFEF or
+                          0x2000 <= cp <= 0x206F or
+                          0x0020 <= cp <= 0x007E):
+                          all_chars.add(ch)
+          # Add extras for station metadata
+          for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789·\xb7—…""''《》、。•°±×÷…—–　':
+              all_chars.add(ch)
+          os.makedirs('scripts', exist_ok=True)
+          with open('scripts/charlist.txt', 'w', encoding='utf-8') as f:
+              f.write(''.join(sorted(all_chars)))
+          print(f'Character list: {len(all_chars)} unique glyphs')
+          PYEOF
+
+      - name: Download CJK font and build BCFNT
+        run: |
+          echo "=== Downloading Noto Sans SC CJK font ==="
+          # Noto Sans SC Regular (SIL Open Font License 1.1 - freely redistributable)
+          curl -sSL -o /tmp/NotoSansSC-Regular.ttf \
+            "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
+
+          echo "=== Building BCFNT font with mkbcfnt ==="
+          # -s 14: font size 14px (good for 3DS screen)
+          # -t utf16: UTF-16 encoding (required for CJK)
+          # -l: character list for subsetting
+          mkbcfnt -o romfs/chinese.bcfnt -t utf16 -s 14 \
+            -l scripts/charlist.txt /tmp/NotoSansSC-Regular.ttf
+
           ls -la romfs/chinese.bcfnt
+          echo "BCFNT font built successfully"
 
       - name: Download CA certificates
         run: |
