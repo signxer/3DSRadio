@@ -254,3 +254,147 @@ const char *tr_about_desc(void) {
 const char *tr_about_powered(void) {
     return is_chinese() ? "由 radio-browser.info 提供技术支持" : "Powered by radio-browser.info";
 }
+
+/* ======================================================================
+ * Additional UI translations
+ * ====================================================================== */
+
+const char *tr_menu_header(void) {
+    return is_chinese() ? "菜单" : "Menu";
+}
+
+const char *tr_genres_available(int count) {
+    static char buf[64];
+    if (is_chinese()) {
+        snprintf(buf, sizeof(buf), "共 %d 个风格", count);
+    } else {
+        snprintf(buf, sizeof(buf), "%d genres available", count);
+    }
+    return buf;
+}
+
+const char *tr_nav_hint_genres(void) {
+    return is_chinese() ? "\x1E \x1F 导航   A 选择   B 返回" : "\x1E \x1F Navigate   A Select   B Back";
+}
+
+const char *tr_nav_hint_stations(void) {
+    return is_chinese() ? "\x1E \x1F 浏览   A 播放   Y 详情   B 返回" : "\x1E \x1F Browse   A Play   Y Info   B Back";
+}
+
+const char *tr_internet_radio(void) {
+    return is_chinese() ? "网络电台" : "Internet Radio";
+}
+
+const char *tr_votes_clicks(int votes, int clicks) {
+    static char buf[64];
+    if (is_chinese()) {
+        snprintf(buf, sizeof(buf), "\x02 %d 票  \xb7  %d 次点击", votes, clicks);
+    } else {
+        snprintf(buf, sizeof(buf), "\x02 %d votes  \xb7  %d clicks", votes, clicks);
+    }
+    return buf;
+}
+
+const char *tr_na(void) {
+    return is_chinese() ? "未知" : "N/A";
+}
+
+const char *tr_station_details(void) {
+    return is_chinese() ? "电台详情" : "Station Details";
+}
+
+const char *tr_about_tagline(void) {
+    return is_chinese() ? "3DSRadio v1.0 - 皮肤驱动界面" : "3DSRadio v1.0 - Skin-powered UI";
+}
+
+const char *tr_volume_level(int pct) {
+    static char buf[16];
+    if (is_chinese()) {
+        snprintf(buf, sizeof(buf), "音量: %d%%", pct);
+    } else {
+        snprintf(buf, sizeof(buf), "Vol: %d%%", pct);
+    }
+    return buf;
+}
+
+const char *tr_failed(const char *reason) {
+    static char buf[128];
+    if (is_chinese()) {
+        snprintf(buf, sizeof(buf), "失败: %s", reason);
+    } else {
+        snprintf(buf, sizeof(buf), "Failed: %s", reason);
+    }
+    return buf;
+}
+
+const char *tr_wifi_error(void) {
+    return is_chinese() ? "WiFi 未连接 - 请检查网络设置" : "WiFi not connected - check network settings";
+}
+
+const char *tr_loading_genres(void) {
+    return is_chinese() ? "加载风格中..." : "Loading genres...";
+}
+
+const char *tr_genres_loaded(int count) {
+    static char buf[64];
+    if (is_chinese()) {
+        snprintf(buf, sizeof(buf), "已加载 %d 个风格", count);
+    } else {
+        snprintf(buf, sizeof(buf), "%d genres loaded", count);
+    }
+    return buf;
+}
+
+const char *tr_loading_stations(void) {
+    return is_chinese() ? "加载电台中..." : "Loading stations...";
+}
+
+const char *tr_stations_loaded(void) {
+    return is_chinese() ? "热门电台已加载" : "Top stations loaded";
+}
+
+const char *tr_stream_url_failed(void) {
+    return is_chinese() ? "无法获取流地址" : "Failed to get stream URL";
+}
+
+const char *tr_streaming(void) {
+    return is_chinese() ? "播放中" : "Streaming";
+}
+
+const char *tr_stream_failed(void) {
+    return is_chinese() ? "无法启动流播放" : "Failed to start stream";
+}
+
+const char *tr_skin_fallback(void) {
+    return is_chinese() ? "皮肤未加载，使用备用渲染" : "Skin not loaded, using fallback rendering";
+}
+
+const char *tr_welcome(void) {
+    return is_chinese() ? "欢迎使用 3DSRadio" : "Welcome to 3DSRadio";
+}
+
+const char *tr_buffer_size(void) {
+    return is_chinese() ? "缓冲大小" : "Buffer Size";
+}
+
+const char *tr_buffer_small(void) {
+    return is_chinese() ? "小 (低延迟)" : "Small (Low Latency)";
+}
+
+const char *tr_buffer_medium(void) {
+    return is_chinese() ? "中 (均衡)" : "Medium (Balanced)";
+}
+
+const char *tr_buffer_large(void) {
+    return is_chinese() ? "大 (流畅)" : "Large (Smooth)";
+}
+
+const char *tr_buffer_changed(const char *size_label) {
+    static char buf[64];
+    if (is_chinese()) {
+        snprintf(buf, sizeof(buf), "缓冲已设为: %s", size_label);
+    } else {
+        snprintf(buf, sizeof(buf), "Buffer set to: %s", size_label);
+    }
+    return buf;
+}

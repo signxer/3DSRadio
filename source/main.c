@@ -105,6 +105,7 @@ typedef struct {
     StreamPlayer *stream_player;
     float volume;
     u32 play_start_tick;
+    StreamBufSize buffer_size;  /* Audio buffer preset */
 
     /* Search */
     char search_query[64];
@@ -267,7 +268,10 @@ static void draw_label(float x, float y, float size, u32 color,
     }
 
     C2D_TextOptimize(&c2d_text);
-    C2D_DrawText(&c2d_text, C2D_WithColor, x, y, 0.5f, size, size, color);
+    /* z=0.45f ensures text renders on top of nine-slice backgrounds at z=0.5f.
+     * In citro2d's depth-sorted pipeline, smaller z = closer to the camera,
+     * so text will never be obscured by selection highlights or buttons. */
+    C2D_DrawText(&c2d_text, C2D_WithColor, x, y, 0.45f, size, size, color);
 }
 
 /* Status bar at bottom of top screen */
@@ -279,11 +283,15 @@ static void draw_status_bar(void) {
         C2D_DrawRectSolid(0, TOP_HEIGHT - 20, 0.5f, TOP_WIDTH, 20, CLR_STATUSBAR);
     }
 
-    draw_label(10, TOP_HEIGHT - 18, 0.4f, CLR_TEXT_DIM, "3DSRadio v1.0");
+    draw_label(10, TOP_HEIGHT - 18, 0.4f, CLR_TEXT_DIM, "%s", tr_about_title());
+    /* Buffer size indicator */
+    const char *buf_names[] = {tr_buffer_small(), tr_buffer_medium(), tr_buffer_large()};
+    draw_label(TOP_WIDTH/2 - 40, TOP_HEIGHT - 18, 0.35f, CLR_TEXT_DIM,
+               "%s: %s", tr_buffer_size(), buf_names[app.buffer_size]);
 
-    const char *wifi = net_wifi_status() ? "\x01 Wi-Fi" : "\x02 No Wi-Fi";
+    const char *wifi_label = net_wifi_status() ? tr_wifi_connected() : tr_wifi_disconnected();
     u32 wifi_color = net_wifi_status() ? CLR_OK : CLR_ERR;
-    draw_label(TOP_WIDTH - 90, TOP_HEIGHT - 18, 0.4f, wifi_color, wifi);
+    draw_label(TOP_WIDTH - 130, TOP_HEIGHT - 18, 0.4f, wifi_color, "%s", wifi_label);
 
     if (strlen(app.status_text) > 0) {
         u64 now = svcGetSystemTick();
@@ -328,13 +336,13 @@ static void render_main_menu(void) {
     /* Title */
     draw_label(20, 140, 0.7f, CLR_TEXT_SEC, "%s", tr_main_subtitle());
     draw_label(20, 162, 0.5f, CLR_TEXT_DIM, "%s", tr_about_powered());
-    draw_label(20, 185, 0.4f, CLR_TEXT_DIM, "Browse thousands of stations worldwide");
+    draw_label(20, 185, 0.4f, CLR_TEXT_DIM, "%s", tr_about_desc());
 
     /* Bottom screen: menu */
     select_bottom();
     clear_bottom();
 
-    draw_label(15, 8, 0.55f, CLR_TEXT_SEC, "Menu");
+    draw_label(15, 8, 0.55f, CLR_TEXT_SEC, "%s", tr_menu_header());
 
     const char *items[] = {
         tr_menu_browse_genre(), tr_menu_top_stations(),
@@ -354,6 +362,10 @@ static void render_main_menu(void) {
         draw_label(BOT_WIDTH - 30, y + 10, 0.5f, CLR_TEXT_DIM, ">");
     }
 
+    /* Buffer size hint */
+    draw_label(15, BOT_HEIGHT - 22, 0.32f, CLR_TEXT_DIM,
+               "SELECT " "\x1E" " " "%s", tr_buffer_size());
+
     draw_status_bar();
 }
 
@@ -367,7 +379,7 @@ static void render_tag_list(void) {
     select_bottom();
     clear_bottom();
 
-    draw_label(15, 8, 0.5f, CLR_TEXT_DIM, "%d genres available", app.tag_count);
+    draw_label(15, 8, 0.5f, CLR_TEXT_DIM, "%s", tr_genres_available(app.tag_count));
 
     int start = app.scroll_offset;
     int end = start + MAX_VISIBLE_ITEMS;
@@ -394,7 +406,7 @@ static void render_tag_list(void) {
     /* Hint bar using footer skin */
     draw_panel(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18);
     draw_label(12, BOT_HEIGHT - 20, 0.35f, CLR_TEXT_DIM,
-               "\x1E \x1F Navigate   A Select   B Back");
+               "%s", tr_nav_hint_genres());
 
     draw_status_bar();
 }
@@ -451,7 +463,7 @@ static void render_station_list(void) {
 
     draw_panel(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18);
     draw_label(12, BOT_HEIGHT - 20, 0.35f, CLR_TEXT_DIM,
-               "\x1E \x1F Browse   A Play   Y Info   B Back");
+               "%s", tr_nav_hint_stations());
 
     draw_status_bar();
 }
@@ -496,15 +508,13 @@ static void render_playing(void) {
     } else if (strlen(app.current_station->country) > 0) {
         snprintf(info, sizeof(info), "%s", app.current_station->country);
     } else {
-        snprintf(info, sizeof(info), "Internet Radio");
+        snprintf(info, sizeof(info), "%s", tr_internet_radio());
     }
     draw_label(20, 95, 0.45f, CLR_TEXT_SEC, "%s", info);
 
     /* Votes */
-    char stats[64];
-    snprintf(stats, sizeof(stats), "\x02 %d votes  \xb7  %d clicks",
-             app.current_station->votes, app.current_station->clickcount);
-    draw_label(20, 118, 0.35f, CLR_TEXT_DIM, "%s", stats);
+    draw_label(20, 118, 0.35f, CLR_TEXT_DIM, "%s",
+               tr_votes_clicks(app.current_station->votes, app.current_station->clickcount));
 
     /* Visualizer area - animated bars */
     int bar_count = 20;
@@ -537,11 +547,11 @@ static void render_playing(void) {
         app.is_playing ? CLR_OK : CLR_WARN);
     draw_label(38, TOP_HEIGHT - 45, 0.5f,
                app.is_playing ? CLR_OK : CLR_WARN,
-               app.is_playing ? "\x01 Now Playing" : "\x02 Paused");
+               "%s", app.is_playing ? tr_now_playing() : tr_paused());
 
     /* Volume */
     draw_label(TOP_WIDTH - 80, TOP_HEIGHT - 45, 0.35f, CLR_TEXT_DIM,
-               "Vol: %.0f%%", app.volume * 100);
+               "%s", tr_volume_level((int)(app.volume * 100)));
 
     /* Progress bar using skin */
     select_top();
@@ -605,8 +615,8 @@ static void render_search(void) {
     draw_panel(10, 20, BOT_WIDTH - 20, 40);
     draw_label(20, 28, 0.35f, CLR_TEXT_DIM, "%s", tr_search_prompt());
     draw_label(20, 42, 0.5f, CLR_ACCENT,
-               strlen(app.search_query) > 0 ? "%s_" : "Type a station name...",
-               app.search_query);
+               strlen(app.search_query) > 0 ? "%s_" : "%s",
+               app.search_query[0] ? app.search_query : tr_search_hint());
 
     /* Hint panel */
     draw_panel(10, 80, BOT_WIDTH - 20, 55);
@@ -643,11 +653,11 @@ static void render_station_info(void) {
 
     y += 20;
     draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_country());
-    draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->country[0] ? s->country : "N/A");
+    draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->country[0] ? s->country : tr_na());
 
     y += 20;
     draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_codec());
-    draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->codec[0] ? s->codec : "N/A");
+    draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->codec[0] ? s->codec : tr_na());
 
     y += 20;
     draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_bitrate());
@@ -655,7 +665,7 @@ static void render_station_info(void) {
 
     y += 20;
     draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_language());
-    draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->language[0] ? s->language : "N/A");
+    draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->language[0] ? s->language : tr_na());
 
     y += 20;
     draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_votes());
@@ -668,7 +678,7 @@ static void render_station_info(void) {
     select_bottom();
     clear_bottom();
 
-    draw_label(15, 12, 0.5f, CLR_TEXT_SEC, "Station Details");
+    draw_label(15, 12, 0.5f, CLR_TEXT_SEC, "%s", tr_station_details());
 
     /* Tags section */
     if (strlen(s->tags) > 0) {
@@ -731,6 +741,20 @@ static void handle_input(void) {
                 }
             }
 
+            /* SELECT cycles audio buffer size (Small → Medium → Large) */
+            if (kDown & KEY_SELECT) {
+                app.buffer_size = (app.buffer_size + 1) % 3;
+                const char *size_names[] = {
+                    tr_buffer_small(), tr_buffer_medium(), tr_buffer_large()
+                };
+                set_status("%s", CLR_INFO, tr_buffer_changed(size_names[app.buffer_size]));
+                /* Recreate stream player with new buffer config */
+                if (app.stream_player) {
+                    stream_player_destroy(app.stream_player);
+                }
+                app.stream_player = stream_player_create_with_bufsize(app.buffer_size);
+            }
+
             if (kDown & KEY_A) {
                 switch (app.selection) {
                     case 0: load_tags(); break;
@@ -741,7 +765,7 @@ static void handle_input(void) {
                         app.screen = SCREEN_SEARCH;
                         break;
                     case 3:
-                        set_status("3DSRadio v1.0 - Skin-powered UI", CLR_INFO);
+                        set_status("%s", CLR_INFO, tr_about_tagline());
                         break;
                 }
             }
@@ -821,8 +845,9 @@ static void handle_input(void) {
                 if (app.stream_player) {
                     stream_player_toggle_pause(app.stream_player);
                     bool paused = stream_player_is_paused(app.stream_player);
-                    set_status(paused ? "Paused" : "Playing",
-                              paused ? CLR_WARN : CLR_OK);
+                    set_status("%s",
+                              paused ? CLR_WARN : CLR_OK,
+                              paused ? tr_paused() : tr_playing());
                 }
             }
             if (kDown & KEY_B) {
@@ -838,13 +863,13 @@ static void handle_input(void) {
                 app.volume = fmax(0.0f, app.volume - 0.1f);
                 if (app.stream_player)
                     stream_player_set_volume(app.stream_player, app.volume);
-                set_status("Volume: %.0f%%", CLR_INFO, app.volume * 100);
+                set_status("%s", CLR_INFO, tr_volume_level((int)(app.volume * 100)));
             }
             if (kDown & KEY_Y) {
                 app.volume = fmin(1.0f, app.volume + 0.1f);
                 if (app.stream_player)
                     stream_player_set_volume(app.stream_player, app.volume);
-                set_status("Volume: %.0f%%", CLR_INFO, app.volume * 100);
+                set_status("%s", CLR_INFO, tr_volume_level((int)(app.volume * 100)));
             }
             if (touch_active && touch.py >= 45 && touch.py <= 100) {
                 int idx = (touch.px - 8) / 78;
@@ -881,7 +906,7 @@ static void handle_input(void) {
         case SCREEN_SEARCH: {
             if (kDown & KEY_A) {
                 if (strlen(app.search_query) > 0) {
-                    set_status("Searching...", CLR_INFO);
+                    set_status("%s", CLR_INFO, tr_searching());
                     char error[128];
                     int count = radio_search_by_name(app.search_query, app.stations,
                                                        MAX_STATIONS, error, sizeof(error));
@@ -890,11 +915,9 @@ static void handle_input(void) {
                         app.selection = 0;
                         app.scroll_offset = 0;
                         app.screen = SCREEN_STATION_LIST;
-                        char msg[64];
-                        snprintf(msg, sizeof(msg), "Found %d stations", count);
-                        set_status(msg, CLR_OK);
+                        set_status("%s", CLR_OK, tr_stations_found(count));
                     } else {
-                        set_status("No stations found", CLR_WARN);
+                        set_status("%s", CLR_WARN, tr_no_results());
                     }
                 }
             }
@@ -920,10 +943,10 @@ static void handle_input(void) {
 
 static void load_tags(void) {
     if (!net_wifi_status()) {
-        set_status("WiFi not connected - check emulator network settings", CLR_ERR);
+        set_status("%s", CLR_ERR, tr_wifi_error());
         return;
     }
-    set_status("Loading genres...", CLR_INFO);
+    set_status("%s", CLR_INFO, tr_loading_genres());
 
     char error[128];
     int count = radio_fetch_tags(app.tags, MAX_TAGS, error, sizeof(error));
@@ -933,18 +956,18 @@ static void load_tags(void) {
         app.selection = 0;
         app.scroll_offset = 0;
         app.screen = SCREEN_TAG_LIST;
-        set_status("%d genres loaded", CLR_OK, count);
+        set_status("%s", CLR_OK, tr_genres_loaded(count));
     } else {
-        set_status("Failed: %s", CLR_ERR, error[0] ? error : "Network error");
+        set_status("%s", CLR_ERR, tr_failed(error[0] ? error : tr_internet_radio()));
     }
 }
 
 static void load_top_stations(void) {
     if (!net_wifi_status()) {
-        set_status("WiFi not connected - check emulator network settings", CLR_ERR);
+        set_status("%s", CLR_ERR, tr_wifi_error());
         return;
     }
-    set_status("Loading top stations...", CLR_INFO);
+    set_status("%s", CLR_INFO, tr_loading_stations());
 
     char error[128];
     int count = radio_fetch_topclick(app.stations, MAX_STATIONS, error, sizeof(error));
@@ -954,18 +977,18 @@ static void load_top_stations(void) {
         app.selection = 0;
         app.scroll_offset = 0;
         app.screen = SCREEN_STATION_LIST;
-        set_status("Top stations loaded", CLR_OK);
+        set_status("%s", CLR_OK, tr_stations_loaded());
     } else {
-        set_status("Failed: %s", CLR_ERR, error[0] ? error : "Network error");
+        set_status("%s", CLR_ERR, tr_failed(error[0] ? error : tr_internet_radio()));
     }
 }
 
 static void load_stations_by_tag(const char *tag) {
     if (!net_wifi_status()) {
-        set_status("WiFi not connected - check emulator network settings", CLR_ERR);
+        set_status("%s", CLR_ERR, tr_wifi_error());
         return;
     }
-    set_status("Loading stations...", CLR_INFO);
+    set_status("%s", CLR_INFO, tr_loading());
 
     char error[128];
     int count = radio_fetch_by_tag(tag, app.stations, MAX_STATIONS, error, sizeof(error));
@@ -975,9 +998,9 @@ static void load_stations_by_tag(const char *tag) {
         app.selection = 0;
         app.scroll_offset = 0;
         app.screen = SCREEN_STATION_LIST;
-        set_status("Found %d stations", CLR_OK, count);
+        set_status("%s", CLR_OK, tr_stations_found(count));
     } else {
-        set_status("Failed: %s", CLR_ERR, error[0] ? error : "No stations found");
+        set_status("%s", CLR_ERR, tr_failed(error[0] ? error : tr_no_results()));
     }
 }
 
@@ -987,7 +1010,7 @@ static void play_station(int index) {
     app.current_station = &app.stations[index];
     app.is_playing = false;
 
-    set_status("Connecting to stream...", CLR_INFO);
+    set_status("%s", CLR_INFO, tr_connecting_stream());
 
     char error[128];
     int ret = radio_get_stream_url(app.current_station->stationuuid,
@@ -1003,7 +1026,7 @@ static void play_station(int index) {
             strncpy(app.stream_url, app.current_station->url, sizeof(app.stream_url) - 1);
             play_url = app.stream_url;
         } else {
-            set_status("Failed to get stream URL", CLR_ERR);
+            set_status("%s", CLR_ERR, tr_stream_url_failed());
             return;
         }
     }
@@ -1015,9 +1038,9 @@ static void play_station(int index) {
             app.is_playing = true;
             app.play_start_tick = svcGetSystemTick();
             app.screen = SCREEN_PLAYING;
-            set_status("Streaming", CLR_OK);
+            set_status("%s", CLR_OK, tr_streaming());
         } else {
-            set_status("Failed to start stream", CLR_ERR);
+            set_status("%s", CLR_ERR, tr_stream_failed());
         }
     }
 }
@@ -1054,16 +1077,17 @@ int main(void) {
     ui_skin_init(&skin);
     if (!ui_skin_load(&skin, "romfs:/ui-skin-dark.png")) {
         /* Skin load failed — will use solid-color fallbacks throughout */
-        set_status("Skin not loaded, using fallback rendering", CLR_WARN);
+        set_status("%s", CLR_WARN, tr_skin_fallback());
     }
 
     /* App state */
     memset(&app, 0, sizeof(app));
     app.screen = SCREEN_MAIN_MENU;
     app.volume = 0.8f;
+    app.buffer_size = STREAM_BUF_MEDIUM;
 
-    set_status("Welcome to 3DSRadio", CLR_INFO);
-    app.stream_player = stream_player_create();
+    set_status("%s", CLR_INFO, tr_welcome());
+    app.stream_player = stream_player_create_with_bufsize(app.buffer_size);
 
     /* Main loop */
     while (aptMainLoop()) {

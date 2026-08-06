@@ -24,11 +24,30 @@
  * - CRITICAL: DSP_FlushDataCache + ndspChnWaveBufAdd required for sound
  * ====================================================================== */
 
-#define NUM_WAVE_BUFS 4
-#define PCM_BUF_SAMPLES 8192   /* Samples per wave buffer (per channel) */
-#define DOWNLOAD_BUF_SIZE (256 * 1024)  /* 256 KB raw MP3 download buffer */
+#define NUM_WAVE_BUFS_MAX 5
+#define PCM_BUF_SAMPLES_MAX 16384  /* Max samples per wave buffer (per channel) */
+#define DOWNLOAD_BUF_MAX (512 * 1024)  /* 512 KB max raw MP3 download buffer */
+#define STAGE_BUF_MAX 131072  /* 128 KB max staging buffer */
+
+/* Buffer size presets (indexed by StreamBufSize enum) */
+static const struct {
+    int num_wave_bufs;
+    int pcm_buf_samples;
+    size_t download_buf_size;
+    size_t stage_buf_size;
+} buf_configs[] = {
+    [STREAM_BUF_SMALL]  = { 3,  4096, 128 * 1024, 32768  },
+    [STREAM_BUF_MEDIUM] = { 4,  8192, 256 * 1024, 65536  },
+    [STREAM_BUF_LARGE]  = { 5, 16384, 512 * 1024, 131072 },
+};
 
 struct StreamPlayer {
+    /* Buffer configuration */
+    StreamBufSize bufsize;
+    int num_wave_bufs;
+    int pcm_buf_samples;
+    size_t download_buf_size;
+
     /* Download state */
     CURL *curl;
     volatile bool download_active;
@@ -47,8 +66,8 @@ struct StreamPlayer {
     bool decoder_initialized;
 
     /* NDSP audio output */
-    ndspWaveBuf wave_bufs[NUM_WAVE_BUFS];
-    int16_t *pcm_data[NUM_WAVE_BUFS];  /* linearAlloc'd PCM buffers */
+    ndspWaveBuf wave_bufs[NUM_WAVE_BUFS_MAX];
+    int16_t *pcm_data[NUM_WAVE_BUFS_MAX];  /* linearAlloc'd PCM buffers */
     int next_buf;          /* Next wave buffer to fill */
     int active_channels;   /* 1 or 2 */
     int sample_rate;       /* e.g. 44100 */
@@ -57,7 +76,7 @@ struct StreamPlayer {
      * ring buffer. After each decode, only info.frame_bytes bytes
      * are consumed — NOT the entire read. This prevents the data
      * discard bug that caused "chalk-writing noise." */
-    uint8_t stage[65536];
+    uint8_t stage[STAGE_BUF_MAX];
     size_t stage_len;
     size_t stage_off;
 
@@ -80,11 +99,11 @@ static size_t download_write_cb(void *contents, size_t size, size_t nmemb, void 
     uint8_t *data = (uint8_t *)contents;
 
     for (size_t i = 0; i < total; i++) {
-        size_t next_write = (p->mp3_write_pos + 1) % DOWNLOAD_BUF_SIZE;
+        size_t next_write = (p->mp3_write_pos + 1) % p->download_buf_size;
         /* If buffer full, wait briefly for decoder to consume */
         if (next_write == p->mp3_read_pos) {
             svcSleepThread(10000); /* 10 us */
-            next_write = (p->mp3_write_pos + 1) % DOWNLOAD_BUF_SIZE;
+            next_write = (p->mp3_write_pos + 1) % p->download_buf_size;
             if (next_write == p->mp3_read_pos) {
                 /* Still full - drop this chunk to avoid blocking curl */
                 return total;
@@ -157,12 +176,20 @@ static void submit_wave_buffer(ndspWaveBuf *buf, int16_t *pcm_data,
  * Public API
  * ====================================================================== */
 
-StreamPlayer *stream_player_create(void) {
+StreamPlayer *stream_player_create_with_bufsize(StreamBufSize bufsize) {
+    if (bufsize > STREAM_BUF_LARGE) bufsize = STREAM_BUF_MEDIUM;
+
     StreamPlayer *p = calloc(1, sizeof(StreamPlayer));
     if (!p) return NULL;
 
+    /* Store buffer configuration */
+    p->bufsize = bufsize;
+    p->num_wave_bufs = buf_configs[bufsize].num_wave_bufs;
+    p->pcm_buf_samples = buf_configs[bufsize].pcm_buf_samples;
+    p->download_buf_size = buf_configs[bufsize].download_buf_size;
+
     /* Allocate MP3 download ring buffer */
-    p->mp3_buffer = malloc(DOWNLOAD_BUF_SIZE);
+    p->mp3_buffer = malloc(p->download_buf_size);
     if (!p->mp3_buffer) {
         free(p);
         return NULL;
@@ -170,8 +197,8 @@ StreamPlayer *stream_player_create(void) {
 
     /* Allocate PCM buffers from linear memory (required for NDSP DMA).
      * ndspWaveBuf data MUST be in linear memory, not regular heap. */
-    for (int i = 0; i < NUM_WAVE_BUFS; i++) {
-        p->pcm_data[i] = (int16_t *)linearAlloc(PCM_BUF_SAMPLES * sizeof(int16_t) * 2);
+    for (int i = 0; i < p->num_wave_bufs; i++) {
+        p->pcm_data[i] = (int16_t *)linearAlloc(p->pcm_buf_samples * sizeof(int16_t) * 2);
         if (!p->pcm_data[i]) {
             for (int j = 0; j < i; j++)
                 linearFree(p->pcm_data[j]);
@@ -186,7 +213,7 @@ StreamPlayer *stream_player_create(void) {
      * On emulators (Azahar/Citra), it's bundled with the emulator. */
     Result ndsp_result = ndspInit();
     if (R_FAILED(ndsp_result)) {
-        for (int j = 0; j < NUM_WAVE_BUFS; j++)
+        for (int j = 0; j < p->num_wave_bufs; j++)
             linearFree(p->pcm_data[j]);
         free(p->mp3_buffer);
         free(p);
@@ -202,6 +229,10 @@ StreamPlayer *stream_player_create(void) {
     p->active_channels = 2;
     p->sample_rate = 44100;
     return p;
+}
+
+StreamPlayer *stream_player_create(void) {
+    return stream_player_create_with_bufsize(STREAM_BUF_MEDIUM);
 }
 
 int stream_player_play(StreamPlayer *p, const char *url) {
@@ -240,8 +271,8 @@ int stream_player_play(StreamPlayer *p, const char *url) {
 
     /* Clear all wave buffers */
     memset(&p->wave_bufs, 0, sizeof(p->wave_bufs));
-    for (int i = 0; i < NUM_WAVE_BUFS; i++) {
-        memset(p->pcm_data[i], 0, PCM_BUF_SAMPLES * sizeof(int16_t) * 2);
+    for (int i = 0; i < p->num_wave_bufs; i++) {
+        memset(p->pcm_data[i], 0, p->pcm_buf_samples * sizeof(int16_t) * 2);
     }
 
     /* Start HTTP download */
@@ -304,12 +335,12 @@ void stream_player_update(StreamPlayer *p) {
             break;
         }
         stage[(*stage_len)++] = p->mp3_buffer[p->mp3_read_pos];
-        p->mp3_read_pos = (p->mp3_read_pos + 1) % DOWNLOAD_BUF_SIZE;
+        p->mp3_read_pos = (p->mp3_read_pos + 1) % p->download_buf_size;
     }
 
     /* Check if we need to fill more wave buffers */
-    for (int i = 0; i < NUM_WAVE_BUFS; i++) {
-        int buf_idx = (p->next_buf + i) % NUM_WAVE_BUFS;
+    for (int i = 0; i < p->num_wave_bufs; i++) {
+        int buf_idx = (p->next_buf + i) % p->num_wave_bufs;
         ndspWaveBuf *buf = &p->wave_bufs[buf_idx];
 
         if (buf->status != NDSP_WBUF_DONE &&
@@ -319,7 +350,7 @@ void stream_player_update(StreamPlayer *p) {
 
         int16_t *out = p->pcm_data[buf_idx];
         int total_samples = 0;
-        int max_samples = PCM_BUF_SAMPLES * 2;
+        int max_samples = p->pcm_buf_samples * 2;
 
         while (total_samples < max_samples) {
             /* Refill staging buffer if running low */
@@ -338,7 +369,7 @@ void stream_player_update(StreamPlayer *p) {
                         break;
                     }
                     stage[(*stage_len)++] = p->mp3_buffer[p->mp3_read_pos];
-                    p->mp3_read_pos = (p->mp3_read_pos + 1) % DOWNLOAD_BUF_SIZE;
+                    p->mp3_read_pos = (p->mp3_read_pos + 1) % p->download_buf_size;
                 }
             }
 
@@ -387,7 +418,7 @@ void stream_player_update(StreamPlayer *p) {
             if (p->mp3_eof && p->mp3_read_pos == p->mp3_write_pos &&
                 *stage_len - *stage_off == 0) {
                 bool any_playing = false;
-                for (int j = 0; j < NUM_WAVE_BUFS; j++) {
+                for (int j = 0; j < p->num_wave_bufs; j++) {
                     u32 status = p->wave_bufs[j].status;
                     if (status == NDSP_WBUF_QUEUED ||
                         status == NDSP_WBUF_PLAYING) {
@@ -411,7 +442,7 @@ void stream_player_update(StreamPlayer *p) {
         ndspChnSetMix(0, set_mix);
 
         p->buffering = false;
-        p->next_buf = (buf_idx + 1) % NUM_WAVE_BUFS;
+        p->next_buf = (buf_idx + 1) % p->num_wave_bufs;
     }
 }
 
@@ -460,7 +491,7 @@ void stream_player_destroy(StreamPlayer *p) {
 
     ndspExit();
 
-    for (int i = 0; i < NUM_WAVE_BUFS; i++) {
+    for (int i = 0; i < p->num_wave_bufs; i++) {
         if (p->pcm_data[i]) linearFree(p->pcm_data[i]);
     }
     free(p->mp3_buffer);

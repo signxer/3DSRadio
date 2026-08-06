@@ -12,7 +12,19 @@
 /* Opaque player handle */
 typedef struct StreamPlayer StreamPlayer;
 
-/* Create a new stream player */
+/* Buffer size presets for audio streaming.
+ * Larger buffers reduce stutter but increase memory usage and latency. */
+typedef enum {
+    STREAM_BUF_SMALL  = 0,  /*  4K samples, 3 wave bufs, 128 KB download */
+    STREAM_BUF_MEDIUM = 1,  /*  8K samples, 4 wave bufs, 256 KB download */
+    STREAM_BUF_LARGE  = 2,  /* 16K samples, 5 wave bufs, 512 KB download */
+} StreamBufSize;
+
+/* Create a new stream player with the specified buffer size.
+ * Pass STREAM_BUF_MEDIUM for the default (balanced) configuration. */
+StreamPlayer *stream_player_create_with_bufsize(StreamBufSize bufsize);
+
+/* Deprecated: create with default medium buffer size. */
 StreamPlayer *stream_player_create(void);
 
 /* Start playing a stream URL. Returns 0 on success. */
