@@ -161,7 +161,7 @@ jobs:
           export DEVKITPRO=/opt/devkitpro
           export DEVKITARM=$DEVKITPRO/devkitARM
           export CTRULIB=$DEVKITPRO/libctru
-          export PORTLIBS=$DEVKITPRO/portlibs/arm
+          export PORTLIBS=$DEVKITPRO/portlibs/3ds
           make -j$(nproc)
           ls -la *.3dsx *.elf
 
@@ -171,7 +171,7 @@ jobs:
             export DEVKITPRO=/opt/devkitpro
             export DEVKITARM=$DEVKITPRO/devkitARM
             export CTRULIB=$DEVKITPRO/libctru
-            export PORTLIBS=$DEVKITPRO/portlibs/arm
+            export PORTLIBS=$DEVKITPRO/portlibs/3ds
             make cia 2>&1
             ls -la *.cia 2>/dev/null && echo "CIA built successfully" || echo "No CIA produced"
           else

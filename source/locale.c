@@ -398,3 +398,48 @@ const char *tr_buffer_changed(const char *size_label) {
     }
     return buf;
 }
+
+/* ======================================================================
+ * Language menu translations
+ * ====================================================================== */
+
+const char *tr_menu_browse_language(void) {
+    return is_chinese() ? "按语言浏览" : "Browse by Language";
+}
+
+const char *tr_language_header(void) {
+    return is_chinese() ? "按语言浏览" : "Browse by Language";
+}
+
+const char *tr_language_subtitle(void) {
+    return is_chinese() ? "选择语言，发现相应电台" : "Select a language to find stations";
+}
+
+const char *tr_languages_available(int count) {
+    static char buf[64];
+    if (is_chinese()) {
+        snprintf(buf, sizeof(buf), "共 %d 种语言", count);
+    } else {
+        snprintf(buf, sizeof(buf), "%d languages available", count);
+    }
+    return buf;
+}
+
+const char *tr_nav_hint_languages(void) {
+    return is_chinese() ? "\x1E \x1F 导航   A 选择   B 返回"
+                        : "\x1E \x1F Navigate   A Select   B Back";
+}
+
+const char *tr_loading_languages(void) {
+    return is_chinese() ? "加载语言中..." : "Loading languages...";
+}
+
+const char *tr_languages_loaded(int count) {
+    static char buf[64];
+    if (is_chinese()) {
+        snprintf(buf, sizeof(buf), "已加载 %d 种语言", count);
+    } else {
+        snprintf(buf, sizeof(buf), "%d languages loaded", count);
+    }
+    return buf;
+}

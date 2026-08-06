@@ -112,3 +112,12 @@ const char *tr_buffer_small(void);
 const char *tr_buffer_medium(void);
 const char *tr_buffer_large(void);
 const char *tr_buffer_changed(const char *size_label);
+
+/* Language menu */
+const char *tr_menu_browse_language(void);
+const char *tr_language_header(void);
+const char *tr_language_subtitle(void);
+const char *tr_languages_available(int count);
+const char *tr_nav_hint_languages(void);
+const char *tr_loading_languages(void);
+const char *tr_languages_loaded(int count);

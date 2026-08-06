@@ -68,12 +68,56 @@
 #define CLR_STATUSBAR   0xFF111122  /* Dark status bar */
 
 /* ======================================================================
+ * Async Loading System
+ * Worker thread runs blocking network calls; main loop renders spinner.
+ * Pattern follows stream_player.c's download thread.
+ * ====================================================================== */
+
+typedef enum {
+    ASYNC_IDLE,
+    ASYNC_LOADING,
+    ASYNC_DONE,
+    ASYNC_ERROR,
+    ASYNC_TIMEOUT
+} AsyncState;
+
+typedef enum {
+    ASYNC_REQ_LOAD_TAGS,
+    ASYNC_REQ_LOAD_LANGUAGES,
+    ASYNC_REQ_LOAD_STATIONS_BY_TAG,
+    ASYNC_REQ_LOAD_STATIONS_BY_LANGUAGE,
+    ASYNC_REQ_LOAD_TOP_STATIONS,
+    ASYNC_REQ_SEARCH,
+    ASYNC_REQ_PLAY_STATION,
+} AsyncRequestType;
+
+typedef struct {
+    AsyncRequestType type;
+    char param[256];       /* tag name, language, search query, station UUID */
+} AsyncRequest;
+
+typedef struct {
+    volatile AsyncState state;
+    volatile bool cancel_requested;
+    Thread worker_thread;
+    AsyncRequest request;
+    u32 start_frame;       /* frame_count when loading began */
+    int result_count;
+    char error_msg[128];
+} AsyncLoad;
+
+/* Timeout thresholds in frames (~60fps on 3DS) */
+#define ASYNC_TIMEOUT_LIST     900   /* 15s for tag/language lists */
+#define ASYNC_TIMEOUT_STATIONS 1800  /* 30s for station/stream loads */
+
+/* ======================================================================
  * UI State
  * ====================================================================== */
 
 typedef enum {
     SCREEN_MAIN_MENU,
     SCREEN_TAG_LIST,
+    SCREEN_LANGUAGE_LIST,
     SCREEN_STATION_LIST,
     SCREEN_PLAYING,
     SCREEN_SEARCH,
@@ -81,7 +125,7 @@ typedef enum {
 } AppScreen;
 
 /* Menu items */
-#define MAIN_MENU_COUNT 4
+#define MAIN_MENU_COUNT 5
 
 typedef struct {
     AppScreen screen;
@@ -94,9 +138,14 @@ typedef struct {
     RadioTag tags[MAX_TAGS];
     int tag_count;
 
+    /* Language data */
+    RadioLanguage languages[MAX_TAGS];
+    int language_count;
+
     /* Station data */
     RadioStation stations[MAX_STATIONS];
     int station_count;
+    int station_list_parent;  /* enum AppScreen; where B goes back to */
 
     /* Playing state */
     RadioStation *current_station;
@@ -110,6 +159,9 @@ typedef struct {
     /* Search */
     char search_query[64];
     int search_cursor;
+
+    /* Async loading */
+    AsyncLoad async;
 
     /* Status */
     char status_text[128];
@@ -346,8 +398,8 @@ static void render_main_menu(void) {
     draw_label(15, 8, 0.55f, CLR_TEXT_SEC, "%s", tr_menu_header());
 
     const char *items[] = {
-        tr_menu_browse_genre(), tr_menu_top_stations(),
-        tr_menu_search(), tr_menu_about()
+        tr_menu_browse_genre(), tr_menu_browse_language(),
+        tr_menu_top_stations(), tr_menu_search(), tr_menu_about()
     };
     for (int i = 0; i < MAIN_MENU_COUNT; i++) {
         int y = 35 + i * 48;
@@ -408,6 +460,48 @@ static void render_tag_list(void) {
     draw_panel(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18);
     draw_label(12, BOT_HEIGHT - 20, 0.35f, CLR_TEXT_DIM,
                "%s", tr_nav_hint_genres());
+
+    draw_status_bar();
+}
+
+/* ======================================================================
+ * Screen: Language List
+ * ====================================================================== */
+
+static void render_language_list(void) {
+    draw_hero_header(tr_language_header(), tr_language_subtitle());
+
+    select_bottom();
+    clear_bottom();
+
+    draw_label(15, 8, 0.5f, CLR_TEXT_DIM, "%s", tr_languages_available(app.language_count));
+
+    int start = app.scroll_offset;
+    int end = start + MAX_VISIBLE_ITEMS;
+    if (end > app.language_count) end = app.language_count;
+
+    for (int i = start; i < end; i++) {
+        int idx = i - start;
+        int y = 28 + idx * 20;
+        bool sel = (i == app.selection);
+
+        if (sel) {
+            draw_selection(5, y - 2, BOT_WIDTH - 10, 18);
+        }
+
+        char label[128];
+        snprintf(label, sizeof(label), "%s", app.languages[i].name);
+        char count_str[16];
+        snprintf(count_str, sizeof(count_str), "%d", app.languages[i].stationcount);
+
+        draw_label(15, y, 0.45f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", label);
+        draw_label(BOT_WIDTH - 50, y, 0.35f, CLR_TEXT_DIM, "%s", count_str);
+    }
+
+    /* Hint bar */
+    draw_panel(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18);
+    draw_label(12, BOT_HEIGHT - 20, 0.35f, CLR_TEXT_DIM,
+               "%s", tr_nav_hint_languages());
 
     draw_status_bar();
 }
@@ -709,10 +803,7 @@ static void set_status(const char *fmt, u32 color, ...) {
 }
 
 /* Forward declarations */
-static void load_tags(void);
-static void load_top_stations(void);
-static void load_stations_by_tag(const char *tag);
-static void play_station(int index);
+static void async_launch_load(AsyncRequestType type, const char *param);
 
 /* ======================================================================
  * Input Handling with Touch Support
@@ -758,14 +849,17 @@ static void handle_input(void) {
 
             if (kDown & KEY_A) {
                 switch (app.selection) {
-                    case 0: load_tags(); break;
-                    case 1: load_top_stations(); break;
+                    case 0: async_launch_load(ASYNC_REQ_LOAD_TAGS, ""); break;
+                    case 1: async_launch_load(ASYNC_REQ_LOAD_LANGUAGES, ""); break;
                     case 2:
+                        app.station_list_parent = SCREEN_MAIN_MENU;
+                        async_launch_load(ASYNC_REQ_LOAD_TOP_STATIONS, ""); break;
+                    case 3:
                         memset(app.search_query, 0, sizeof(app.search_query));
                         app.search_cursor = 0;
                         app.screen = SCREEN_SEARCH;
                         break;
-                    case 3:
+                    case 4:
                         set_status("%s", CLR_INFO, tr_about_tagline());
                         break;
                 }
@@ -796,11 +890,49 @@ static void handle_input(void) {
                         kDown |= KEY_A;
                 }
             }
-            if (kDown & KEY_A)
-                load_stations_by_tag(app.tags[app.selection].name);
+            if (kDown & KEY_A) {
+                app.station_list_parent = SCREEN_TAG_LIST;
+                async_launch_load(ASYNC_REQ_LOAD_STATIONS_BY_TAG,
+                                  app.tags[app.selection].name);
+            }
             if (kDown & KEY_B) {
                 app.screen = SCREEN_MAIN_MENU;
-                app.selection = 0;
+                app.selection = 1;
+            }
+            break;
+        }
+
+        case SCREEN_LANGUAGE_LIST: {
+            if (kDown & KEY_DOWN) {
+                if (app.selection < app.language_count - 1) {
+                    app.selection++;
+                    if (app.selection >= app.scroll_offset + MAX_VISIBLE_ITEMS)
+                        app.scroll_offset++;
+                }
+            }
+            if (kDown & KEY_UP) {
+                if (app.selection > 0) {
+                    app.selection--;
+                    if (app.selection < app.scroll_offset)
+                        app.scroll_offset--;
+                }
+            }
+            if (touch_active && touch.py >= 28) {
+                int idx = (touch.py - 28) / 20 + app.scroll_offset;
+                if (idx >= 0 && idx < app.language_count) {
+                    app.selection = idx;
+                    if (touch.px >= 5 && touch.px <= BOT_WIDTH - 5)
+                        kDown |= KEY_A;
+                }
+            }
+            if (kDown & KEY_A) {
+                app.station_list_parent = SCREEN_LANGUAGE_LIST;
+                async_launch_load(ASYNC_REQ_LOAD_STATIONS_BY_LANGUAGE,
+                                  app.languages[app.selection].name);
+            }
+            if (kDown & KEY_B) {
+                app.screen = SCREEN_MAIN_MENU;
+                app.selection = 1;
             }
             break;
         }
@@ -829,9 +961,10 @@ static void handle_input(void) {
                 }
             }
             if (kDown & KEY_A)
-                play_station(app.selection);
+                async_launch_load(ASYNC_REQ_PLAY_STATION,
+                                  app.stations[app.selection].stationuuid);
             if (kDown & KEY_B) {
-                app.screen = SCREEN_TAG_LIST;
+                app.screen = app.station_list_parent;
                 app.selection = 0;
                 app.scroll_offset = 0;
             }
@@ -858,7 +991,7 @@ static void handle_input(void) {
                 app.is_playing = false;
                 app.current_station = NULL;
                 memset(app.stream_url, 0, sizeof(app.stream_url));
-                app.screen = SCREEN_STATION_LIST;
+                app.screen = app.station_list_parent;
             }
             if (kDown & KEY_X) {
                 app.volume = fmax(0.0f, app.volume - 0.1f);
@@ -886,7 +1019,7 @@ static void handle_input(void) {
                             app.is_playing = false;
                             app.current_station = NULL;
                             memset(app.stream_url, 0, sizeof(app.stream_url));
-                            app.screen = SCREEN_STATION_LIST;
+                            app.screen = app.station_list_parent;
                             break;
                         case 2:
                             app.volume = fmax(0.0f, app.volume - 0.1f);
@@ -907,19 +1040,8 @@ static void handle_input(void) {
         case SCREEN_SEARCH: {
             if (kDown & KEY_A) {
                 if (strlen(app.search_query) > 0) {
-                    set_status("%s", CLR_INFO, tr_searching());
-                    char error[128];
-                    int count = radio_search_by_name(app.search_query, app.stations,
-                                                       MAX_STATIONS, error, sizeof(error));
-                    if (count > 0) {
-                        app.station_count = count;
-                        app.selection = 0;
-                        app.scroll_offset = 0;
-                        app.screen = SCREEN_STATION_LIST;
-                        set_status("%s", CLR_OK, tr_stations_found(count));
-                    } else {
-                        set_status("%s", CLR_WARN, tr_no_results());
-                    }
+                    app.station_list_parent = SCREEN_MAIN_MENU;
+                    async_launch_load(ASYNC_REQ_SEARCH, app.search_query);
                 }
             }
             if (kDown & KEY_B) {
@@ -939,111 +1061,261 @@ static void handle_input(void) {
 }
 
 /* ======================================================================
- * Data Loading Functions
+ * Async Loading System
+ * Worker thread — makes blocking network calls so the UI stays alive.
  * ====================================================================== */
 
-static void load_tags(void) {
-    if (!net_wifi_status()) {
-        set_status("%s", CLR_ERR, tr_wifi_error());
+static void async_worker_thread(void *arg) {
+    AsyncRequest *req = &app.async.request;
+    char error[128] = {0};
+    int count = 0;
+
+    switch (req->type) {
+        case ASYNC_REQ_LOAD_TAGS:
+            count = radio_fetch_tags(app.tags, MAX_TAGS, error, sizeof(error));
+            if (count > 0) app.tag_count = count;
+            break;
+
+        case ASYNC_REQ_LOAD_LANGUAGES:
+            count = radio_fetch_languages(app.languages, MAX_TAGS, error, sizeof(error));
+            if (count > 0) app.language_count = count;
+            break;
+
+        case ASYNC_REQ_LOAD_STATIONS_BY_TAG:
+            count = radio_fetch_by_tag(req->param, app.stations, MAX_STATIONS,
+                                        error, sizeof(error));
+            if (count > 0) app.station_count = count;
+            break;
+
+        case ASYNC_REQ_LOAD_STATIONS_BY_LANGUAGE:
+            count = radio_fetch_by_language(req->param, app.stations, MAX_STATIONS,
+                                             error, sizeof(error));
+            if (count > 0) app.station_count = count;
+            break;
+
+        case ASYNC_REQ_LOAD_TOP_STATIONS:
+            count = radio_fetch_topclick(app.stations, MAX_STATIONS, error, sizeof(error));
+            if (count > 0) app.station_count = count;
+            break;
+
+        case ASYNC_REQ_SEARCH:
+            count = radio_search_by_name(req->param, app.stations, MAX_STATIONS,
+                                          error, sizeof(error));
+            if (count > 0) app.station_count = count;
+            break;
+
+        case ASYNC_REQ_PLAY_STATION: {
+            /* Get stream URL, then fall back to url_resolved / url */
+            int idx = -1;
+            for (int i = 0; i < app.station_count; i++) {
+                if (strcmp(app.stations[i].stationuuid, req->param) == 0) {
+                    idx = i; break;
+                }
+            }
+            if (idx < 0) {
+                snprintf(error, sizeof(error), "Station not found");
+                count = -1;
+                break;
+            }
+            app.current_station = &app.stations[idx];
+            int ret = radio_get_stream_url(req->param, app.stream_url,
+                                            sizeof(app.stream_url), error, sizeof(error));
+            if (ret != NET_OK || strlen(app.stream_url) == 0) {
+                if (strlen(app.current_station->url_resolved) > 0) {
+                    strncpy(app.stream_url, app.current_station->url_resolved,
+                            sizeof(app.stream_url) - 1);
+                    count = 0; /* Success with fallback */
+                } else if (strlen(app.current_station->url) > 0) {
+                    strncpy(app.stream_url, app.current_station->url,
+                            sizeof(app.stream_url) - 1);
+                    count = 0;
+                } else {
+                    count = -1;
+                    snprintf(error, sizeof(error), "No stream URL");
+                }
+            }
+            break;
+        }
+    }
+
+    /* Check for cancellation (B pressed during load) */
+    if (app.async.cancel_requested) {
+        app.async.state = ASYNC_IDLE;
         return;
     }
-    set_status("%s", CLR_INFO, tr_loading_genres());
 
-    char error[128];
-    int count = radio_fetch_tags(app.tags, MAX_TAGS, error, sizeof(error));
-
-    if (count > 0) {
-        app.tag_count = count;
-        app.selection = 0;
-        app.scroll_offset = 0;
-        app.screen = SCREEN_TAG_LIST;
-        set_status("%s", CLR_OK, tr_genres_loaded(count));
+    /* Write results BEFORE setting state = DONE (ordering for main thread) */
+    app.async.result_count = count;
+    if (count < 0) {
+        snprintf(app.async.error_msg, sizeof(app.async.error_msg), "%s",
+                 error[0] ? error : "Unknown error");
+        app.async.state = ASYNC_ERROR;
     } else {
-        set_status("%s", CLR_ERR, tr_failed(error[0] ? error : tr_internet_radio()));
+        app.async.state = ASYNC_DONE;
     }
 }
 
-static void load_top_stations(void) {
-    if (!net_wifi_status()) {
-        set_status("%s", CLR_ERR, tr_wifi_error());
-        return;
-    }
-    set_status("%s", CLR_INFO, tr_loading_stations());
+/* Launch a non-blocking load. Returns immediately; worker runs on another thread. */
+static void async_launch_load(AsyncRequestType type, const char *param) {
+    /* Guard: no concurrent loads */
+    if (app.async.state != ASYNC_IDLE) return;
 
-    char error[128];
-    int count = radio_fetch_topclick(app.stations, MAX_STATIONS, error, sizeof(error));
-
-    if (count > 0) {
-        app.station_count = count;
-        app.selection = 0;
-        app.scroll_offset = 0;
-        app.screen = SCREEN_STATION_LIST;
-        set_status("%s", CLR_OK, tr_stations_loaded());
-    } else {
-        set_status("%s", CLR_ERR, tr_failed(error[0] ? error : tr_internet_radio()));
-    }
-}
-
-static void load_stations_by_tag(const char *tag) {
-    if (!net_wifi_status()) {
-        set_status("%s", CLR_ERR, tr_wifi_error());
-        return;
-    }
-    set_status("%s", CLR_INFO, tr_loading());
-
-    char error[128];
-    int count = radio_fetch_by_tag(tag, app.stations, MAX_STATIONS, error, sizeof(error));
-
-    if (count > 0) {
-        app.station_count = count;
-        app.selection = 0;
-        app.scroll_offset = 0;
-        app.screen = SCREEN_STATION_LIST;
-        set_status("%s", CLR_OK, tr_stations_found(count));
-    } else {
-        set_status("%s", CLR_ERR, tr_failed(error[0] ? error : tr_no_results()));
-    }
-}
-
-static void play_station(int index) {
-    if (index < 0 || index >= app.station_count) return;
-
-    app.current_station = &app.stations[index];
-    app.is_playing = false;
-
-    set_status("%s", CLR_INFO, tr_connecting_stream());
-
-    char error[128];
-    int ret = radio_get_stream_url(app.current_station->stationuuid,
-                                    app.stream_url, sizeof(app.stream_url),
-                                    error, sizeof(error));
-
-    const char *play_url = app.stream_url;
-    if (ret != NET_OK || strlen(app.stream_url) == 0) {
-        if (strlen(app.current_station->url_resolved) > 0) {
-            strncpy(app.stream_url, app.current_station->url_resolved, sizeof(app.stream_url) - 1);
-            play_url = app.stream_url;
-        } else if (strlen(app.current_station->url) > 0) {
-            strncpy(app.stream_url, app.current_station->url, sizeof(app.stream_url) - 1);
-            play_url = app.stream_url;
-        } else {
-            set_status("%s", CLR_ERR, tr_stream_url_failed());
+    /* WiFi check for network requests */
+    if (type != ASYNC_REQ_PLAY_STATION || true) {
+        if (!net_wifi_status() && type != ASYNC_REQ_PLAY_STATION) {
+            set_status("%s", CLR_ERR, tr_wifi_error());
             return;
         }
     }
 
-    if (app.stream_player) {
-        stream_player_stop(app.stream_player);
-        int r = stream_player_play(app.stream_player, play_url);
-        if (r == 0) {
-            app.is_playing = true;
-            app.play_start_tick = svcGetSystemTick();
-            app.screen = SCREEN_PLAYING;
-            set_status("%s", CLR_OK, tr_streaming());
-        } else {
-            set_status("%s", CLR_ERR, tr_stream_failed());
-        }
+    /* Set status based on request type */
+    switch (type) {
+        case ASYNC_REQ_LOAD_TAGS:
+            set_status("%s", CLR_INFO, tr_loading_genres()); break;
+        case ASYNC_REQ_LOAD_LANGUAGES:
+            set_status("%s", CLR_INFO, tr_loading_languages()); break;
+        case ASYNC_REQ_LOAD_TOP_STATIONS:
+            set_status("%s", CLR_INFO, tr_loading_stations()); break;
+        case ASYNC_REQ_LOAD_STATIONS_BY_TAG:
+        case ASYNC_REQ_LOAD_STATIONS_BY_LANGUAGE:
+        case ASYNC_REQ_SEARCH:
+            set_status("%s", CLR_INFO, tr_loading()); break;
+        case ASYNC_REQ_PLAY_STATION:
+            set_status("%s", CLR_INFO, tr_connecting_stream()); break;
     }
+
+    /* Configure the request */
+    app.async.request.type = type;
+    if (param) {
+        strncpy(app.async.request.param, param, sizeof(app.async.request.param) - 1);
+        app.async.request.param[sizeof(app.async.request.param) - 1] = '\0';
+    } else {
+        app.async.request.param[0] = '\0';
+    }
+
+    app.async.cancel_requested = false;
+    app.async.state = ASYNC_LOADING;
+    app.async.start_frame = app.frame_count;
+
+    /* Spawn worker thread (32KB stack, same as stream_player's download thread) */
+    s32 prio = 0;
+    svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
+    app.async.worker_thread = threadCreate(async_worker_thread, NULL, 32768,
+                                            prio - 1, -2, false);
+}
+
+/* Called from main loop when worker finishes */
+static void async_handle_completion(void) {
+    threadJoin(app.async.worker_thread, U64_MAX);
+    threadFree(app.async.worker_thread);
+
+    int count = app.async.result_count;
+
+    switch (app.async.state) {
+        case ASYNC_DONE:
+            switch (app.async.request.type) {
+                case ASYNC_REQ_LOAD_TAGS:
+                    app.selection = 0;
+                    app.scroll_offset = 0;
+                    app.screen = SCREEN_TAG_LIST;
+                    set_status("%s", CLR_OK, tr_genres_loaded(count));
+                    break;
+
+                case ASYNC_REQ_LOAD_LANGUAGES:
+                    app.selection = 0;
+                    app.scroll_offset = 0;
+                    app.screen = SCREEN_LANGUAGE_LIST;
+                    set_status("%s", CLR_OK, tr_languages_loaded(count));
+                    break;
+
+                case ASYNC_REQ_LOAD_STATIONS_BY_TAG:
+                case ASYNC_REQ_LOAD_STATIONS_BY_LANGUAGE:
+                case ASYNC_REQ_LOAD_TOP_STATIONS:
+                case ASYNC_REQ_SEARCH:
+                    app.selection = 0;
+                    app.scroll_offset = 0;
+                    app.screen = SCREEN_STATION_LIST;
+                    set_status("%s", CLR_OK, tr_stations_found(count));
+                    break;
+
+                case ASYNC_REQ_PLAY_STATION:
+                    if (app.stream_player && app.current_station) {
+                        stream_player_stop(app.stream_player);
+                        int r = stream_player_play(app.stream_player, app.stream_url);
+                        if (r == 0) {
+                            app.is_playing = true;
+                            app.play_start_tick = svcGetSystemTick();
+                            app.screen = SCREEN_PLAYING;
+                            set_status("%s", CLR_OK, tr_streaming());
+                        } else {
+                            set_status("%s", CLR_ERR, tr_stream_failed());
+                        }
+                    }
+                    break;
+            }
+            break;
+
+        case ASYNC_ERROR:
+            set_status("%s", CLR_ERR,
+                       tr_failed(app.async.error_msg[0] ? app.async.error_msg
+                                                         : tr_internet_radio()));
+            break;
+
+        case ASYNC_TIMEOUT:
+            set_status("%s", CLR_WARN,
+                       locale_get_language() == LANG_ZH_CN
+                           ? "请求超时" : "Request timed out");
+            break;
+
+        default:
+            break;
+    }
+
+    app.async.state = ASYNC_IDLE;
+}
+
+/* ======================================================================
+ * Loading Spinner
+ * 8-dot animated spinner overlay on the bottom screen.
+ * ====================================================================== */
+
+static void render_loading_spinner(void) {
+    /* Semi-transparent overlay */
+    C2D_DrawRectSolid(0, 0, 0.5f, BOT_WIDTH, BOT_HEIGHT,
+                      C2D_Color32(0x00, 0x00, 0x00, 0xAA));
+
+    int cx = BOT_WIDTH / 2;
+    int cy = BOT_HEIGHT / 2 - 10;
+    int radius = 18;
+
+    /* 8 dots rotating around center */
+    float base_angle = app.frame_count * 5.0f * (3.14159265f / 180.0f);
+
+    for (int i = 0; i < 8; i++) {
+        float angle = base_angle + i * (3.14159265f * 2.0f / 8.0f);
+        int dx = (int)(radius * cosf(angle));
+        int dy = (int)(radius * sinf(angle));
+
+        /* Alpha fades based on position — chasing-dots effect */
+        u8 alpha = (u8)(55 + (200 * i / 8));
+        u32 color = C2D_Color32(0xFF, 0x44, 0x44, alpha);
+
+        C2D_DrawCircleSolid(cx + dx, cy + dy, 0.5f, 4, color);
+    }
+
+    /* Status text below spinner */
+    const char *msg = tr_loading();
+    switch (app.async.request.type) {
+        case ASYNC_REQ_LOAD_TAGS:       msg = tr_loading_genres(); break;
+        case ASYNC_REQ_LOAD_LANGUAGES:   msg = tr_loading_languages(); break;
+        case ASYNC_REQ_LOAD_STATIONS_BY_TAG:
+        case ASYNC_REQ_LOAD_STATIONS_BY_LANGUAGE:
+        case ASYNC_REQ_LOAD_TOP_STATIONS:
+        case ASYNC_REQ_SEARCH:           msg = tr_loading(); break;
+        case ASYNC_REQ_PLAY_STATION:     msg = tr_connecting_stream(); break;
+    }
+    draw_label(cx - 80, cy + 30, 0.4f, CLR_TEXT,
+               "%-24s", msg);  /* pad for consistent textbuf lifetime */
 }
 
 /* ======================================================================
@@ -1093,12 +1365,47 @@ int main(void) {
     /* Main loop */
     while (aptMainLoop()) {
         hidScanInput();
+
         /* Update audio playback */
         if (app.stream_player) {
             stream_player_update(app.stream_player);
             app.is_playing = stream_player_is_playing(app.stream_player);
         }
-        handle_input();
+
+        /* --- Async completion check --- */
+        if (app.async.state == ASYNC_DONE ||
+            app.async.state == ASYNC_ERROR ||
+            app.async.state == ASYNC_TIMEOUT) {
+            async_handle_completion();
+        }
+
+        /* --- Input (only when idle; B cancels during loading) --- */
+        if (app.async.state == ASYNC_IDLE) {
+            handle_input();
+        } else {
+            /* B cancels the current async load */
+            u32 kDown = hidKeysDown();
+            if (kDown & KEY_B) {
+                app.async.cancel_requested = true;
+                /* Worker checks flag and returns ASYNC_IDLE; completion handler discards */
+            }
+        }
+
+        /* --- Timeout detection --- */
+        if (app.async.state == ASYNC_LOADING) {
+            u32 elapsed = app.frame_count - app.async.start_frame;
+            u32 threshold = (app.async.request.type == ASYNC_REQ_PLAY_STATION ||
+                             app.async.request.type == ASYNC_REQ_LOAD_STATIONS_BY_TAG ||
+                             app.async.request.type == ASYNC_REQ_LOAD_STATIONS_BY_LANGUAGE ||
+                             app.async.request.type == ASYNC_REQ_LOAD_TOP_STATIONS ||
+                             app.async.request.type == ASYNC_REQ_SEARCH)
+                                ? ASYNC_TIMEOUT_STATIONS
+                                : ASYNC_TIMEOUT_LIST;
+            if (elapsed > threshold) {
+                app.async.cancel_requested = true;
+                app.async.state = ASYNC_TIMEOUT;
+            }
+        }
 
         app.frame_count++;
 
@@ -1108,10 +1415,17 @@ int main(void) {
         switch (app.screen) {
             case SCREEN_MAIN_MENU:    render_main_menu(); break;
             case SCREEN_TAG_LIST:     render_tag_list(); break;
+            case SCREEN_LANGUAGE_LIST:render_language_list(); break;
             case SCREEN_STATION_LIST: render_station_list(); break;
             case SCREEN_PLAYING:      render_playing(); break;
             case SCREEN_SEARCH:       render_search(); break;
             case SCREEN_STATION_INFO: render_station_info(); break;
+        }
+
+        /* Spinner overlay on top of whatever screen is showing */
+        if (app.async.state == ASYNC_LOADING) {
+            select_bottom();
+            render_loading_spinner();
         }
 
         draw_end_frame();

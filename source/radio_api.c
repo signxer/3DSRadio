@@ -31,6 +31,8 @@ static int current_server = 0; /* Last working server index */
 #define TOPCLICK_PATH       "/json/stations/topclick/%d?hidebroken=true"
 #define COUNTRY_STATIONS_PATH "/json/stations/bycountrycodeexact/%s?limit=%d&order=clickcount&reverse=true&hidebroken=true"
 #define SEARCH_PATH         "/json/stations/search?name=%s&limit=%d&order=clickcount&reverse=true&hidebroken=true"
+#define LANGUAGE_LIST_PATH  "/json/languages?limit=50&order=stationcount&reverse=true&hidebroken=true"
+#define LANGUAGE_STATIONS_PATH "/json/stations/bylanguageexact/%s?limit=%d&order=clickcount&reverse=true&hidebroken=true"
 #define STREAM_PATH         "/json/url/%s"
 
 static char user_agent[64];
@@ -372,6 +374,68 @@ int radio_search_by_name(const char *name, RadioStation *stations,
                           int max_stations, char *error, size_t error_size) {
     return fetch_stations_by_param(SEARCH_PATH, name, stations, max_stations,
                                     error, error_size);
+}
+
+int radio_fetch_languages(RadioLanguage *languages, int max_languages,
+                           char *error, size_t error_size) {
+    if (!initialized) {
+        snprintf(error, error_size, "Radio API not initialized");
+        return -1;
+    }
+
+    char *response = NULL;
+    size_t response_size = 0;
+
+    int ret = radio_http_get(LANGUAGE_LIST_PATH, &response, &response_size, error, error_size);
+    if (ret != NET_OK) {
+        if (error) snprintf(error, error_size, "HTTP error: %d", ret);
+        return -1;
+    }
+
+    if (!response || response_size == 0) {
+        free(response);
+        return 0;
+    }
+
+    /* Parse JSON array of language objects */
+    JsonToken tokens[JSON_TOKEN_CAPACITY];
+    JsonDoc doc;
+    int count = json_parse(&doc, response, tokens, JSON_TOKEN_CAPACITY);
+    if (count < 0) {
+        free(response);
+        if (error) snprintf(error, error_size, "JSON parse error");
+        return -1;
+    }
+
+    int lang_count = 0;
+    int array = 0; /* Root element is the array */
+
+    for (int i = 0; i < json_arr_size(&doc, array) && lang_count < max_languages; i++) {
+        int obj = json_arr_get(&doc, array, i);
+        if (obj < 0) continue;
+
+        int name_tok = json_obj_get(&doc, obj, "name");
+        int count_tok = json_obj_get(&doc, obj, "stationcount");
+
+        if (name_tok >= 0 && count_tok >= 0) {
+            RadioLanguage *lang = &languages[lang_count];
+            json_string(&doc, name_tok, lang->name, sizeof(lang->name));
+            int64_t val;
+            if (json_i64(&doc, count_tok, &val) == 0) {
+                lang->stationcount = (int)val;
+            }
+            lang_count++;
+        }
+    }
+
+    free(response);
+    return lang_count;
+}
+
+int radio_fetch_by_language(const char *language, RadioStation *stations,
+                             int max_stations, char *error, size_t error_size) {
+    return fetch_stations_by_param(LANGUAGE_STATIONS_PATH, language, stations,
+                                    max_stations, error, error_size);
 }
 
 int radio_get_stream_url(const char *stationuuid, char *url, size_t url_size,

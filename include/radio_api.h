@@ -47,6 +47,12 @@ typedef struct {
     int stationcount;
 } RadioTag;
 
+/* A language with station count */
+typedef struct {
+    char name[RADIO_MAX_TAG];
+    int stationcount;
+} RadioLanguage;
+
 /* Initialize the radio API (sets up HTTP user agent, etc.) */
 void radio_init(void);
 
@@ -69,6 +75,14 @@ int radio_fetch_by_country(const char *country, RadioStation *stations,
 /* Search stations by name. Returns count or negative on error. */
 int radio_search_by_name(const char *name, RadioStation *stations,
                          int max_stations, char *error, size_t error_size);
+
+/* Fetch available languages. Returns count or negative on error. */
+int radio_fetch_languages(RadioLanguage *languages, int max_languages,
+                          char *error, size_t error_size);
+
+/* Fetch stations by language. Returns count or negative on error. */
+int radio_fetch_by_language(const char *language, RadioStation *stations,
+                            int max_stations, char *error, size_t error_size);
 
 /* Get a playable stream URL for a station (increments click counter).
  * Returns NET_OK on success. The url buffer receives the stream URL. */
