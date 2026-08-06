@@ -402,17 +402,17 @@ static void render_main_menu(void) {
         tr_menu_top_stations(), tr_menu_search(), tr_menu_about()
     };
     for (int i = 0; i < MAIN_MENU_COUNT; i++) {
-        int y = 35 + i * 48;
+        int y = 28 + i * 36;
         bool sel = (i == app.selection);
 
-        draw_button(10, y, BOT_WIDTH - 20, 40, sel);
+        draw_button(10, y, BOT_WIDTH - 20, 34, sel);
 
         if (sel) {
-            C2D_DrawRectSolid(10, y, 0.5f, 3, 40, CLR_ACCENT);
+            C2D_DrawRectSolid(10, y, 0.5f, 3, 34, CLR_ACCENT);
         }
 
-        draw_label(22, y + 10, 0.55f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", items[i]);
-        draw_label(BOT_WIDTH - 30, y + 10, 0.5f, CLR_TEXT_DIM, ">");
+        draw_label(22, y + 7, 0.5f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", items[i]);
+        draw_label(BOT_WIDTH - 30, y + 7, 0.5f, CLR_TEXT_DIM, ">");
     }
 
     /* Buffer size hint */
@@ -823,8 +823,8 @@ static void handle_input(void) {
             if (kDown & KEY_UP)
                 app.selection = (app.selection - 1 + MAIN_MENU_COUNT) % MAIN_MENU_COUNT;
 
-            if (touch_active && touch.py >= 35 && touch.py <= 35 + MAIN_MENU_COUNT * 48) {
-                int idx = (touch.py - 35) / 48;
+            if (touch_active && touch.py >= 28 && touch.py <= 28 + MAIN_MENU_COUNT * 36) {
+                int idx = (touch.py - 28) / 36;
                 if (idx >= 0 && idx < MAIN_MENU_COUNT) {
                     app.selection = idx;
                     if (touch.px >= 10 && touch.px <= BOT_WIDTH - 10) {
