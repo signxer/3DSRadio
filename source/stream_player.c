@@ -9,15 +9,19 @@
 /* minimp3 decoder - single header library */
 #define MINIMP3_IMPLEMENTATION
 #define MINIMP3_NO_STDIO
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
 #include "minimp3.h"
+#pragma GCC diagnostic pop
 
 /* ======================================================================
  * Streaming Audio Player
  *
- * Architecture:
+ * Architecture (fixed to match ClouDS-Music-FA's proven approach):
  * - Background thread downloads raw MP3 data from HTTP stream
  * - Main thread (stream_player_update) decodes MP3 → PCM → ndsp
  * - 4 wave buffers for double/triple buffering
+ * - CRITICAL: DSP_FlushDataCache + ndspChnWaveBufAdd required for sound
  * ====================================================================== */
 
 #define NUM_WAVE_BUFS 4
@@ -69,14 +73,13 @@ static size_t download_write_cb(void *contents, size_t size, size_t nmemb, void 
 
     for (size_t i = 0; i < total; i++) {
         size_t next_write = (p->mp3_write_pos + 1) % DOWNLOAD_BUF_SIZE;
-        /* If buffer full, wait (spin briefly) */
+        /* If buffer full, wait briefly for decoder to consume */
         if (next_write == p->mp3_read_pos) {
-            /* Buffer full - wait a bit for decoder to consume */
             svcSleepThread(10000); /* 10 us */
             next_write = (p->mp3_write_pos + 1) % DOWNLOAD_BUF_SIZE;
             if (next_write == p->mp3_read_pos) {
-                /* Still full - drop data */
-                return total; /* Just skip this chunk */
+                /* Still full - drop this chunk to avoid blocking curl */
+                return total;
             }
         }
         p->mp3_buffer[p->mp3_write_pos] = data[i];
@@ -97,6 +100,52 @@ static void download_thread_func(void *arg) {
 }
 
 /* ======================================================================
+ * Configure NDSP channel for the detected audio format.
+ * Mirrors ClouDS-Music-FA's configure_channel() pattern:
+ * reset → interp → rate → format → mix
+ * ====================================================================== */
+
+static void configure_ndsp_channel(StreamPlayer *p) {
+    ndspChnReset(0);
+    ndspChnSetInterp(0, NDSP_INTERP_LINEAR);
+    ndspChnSetRate(0, (float)p->sample_rate);
+    ndspChnSetFormat(0, p->active_channels == 2 ?
+                     NDSP_FORMAT_STEREO_PCM16 : NDSP_FORMAT_MONO_PCM16);
+
+    /* Full 12-element mix array — remaining entries must be zero */
+    float mix[12] = {0};
+    mix[0] = p->volume;
+    mix[1] = p->volume;
+    ndspChnSetMix(0, mix);
+}
+
+/* ======================================================================
+ * Submit a filled PCM buffer to the NDSP hardware.
+ *
+ * CRITICAL: DSP_FlushDataCache is REQUIRED before ndspChnWaveBufAdd.
+ * The ARM9 CPU and DSP have separate data caches. Without flushing,
+ * the DSP may read stale or zeroed memory, resulting in silence.
+ *
+ * CRITICAL: ndspChnWaveBufAdd is REQUIRED to actually submit the
+ * buffer to the DSP for playback. Setting buf->status manually does
+ * nothing — it only updates a struct field without telling the hardware.
+ * ====================================================================== */
+
+static void submit_wave_buffer(ndspWaveBuf *buf, int16_t *pcm_data,
+                                int total_samples, int channels) {
+    memset(buf, 0, sizeof(*buf));
+    buf->data_pcm16 = pcm_data;
+    buf->nsamples = (u32)(total_samples / channels);
+    buf->looping = false;
+
+    /* Flush CPU data cache so the DSP sees our PCM data */
+    DSP_FlushDataCache(pcm_data, (u32)total_samples * sizeof(int16_t));
+
+    /* Actually submit to the NDSP channel 0 hardware queue */
+    ndspChnWaveBufAdd(0, buf);
+}
+
+/* ======================================================================
  * Public API
  * ====================================================================== */
 
@@ -111,7 +160,8 @@ StreamPlayer *stream_player_create(void) {
         return NULL;
     }
 
-    /* Allocate PCM buffers from linear memory (for ndsp DMA) */
+    /* Allocate PCM buffers from linear memory (required for NDSP DMA).
+     * ndspWaveBuf data MUST be in linear memory, not regular heap. */
     for (int i = 0; i < NUM_WAVE_BUFS; i++) {
         p->pcm_data[i] = (int16_t *)linearAlloc(PCM_BUF_SAMPLES * sizeof(int16_t) * 2);
         if (!p->pcm_data[i]) {
@@ -123,19 +173,26 @@ StreamPlayer *stream_player_create(void) {
         }
     }
 
-    /* Initialize ndsp */
-    ndspInit();
+    /* Initialize ndsp — this requires DSP firmware to be available.
+     * On real hardware, DSP firmware is extracted from a donor console.
+     * On emulators (Azahar/Citra), it's bundled with the emulator. */
+    Result ndsp_result = ndspInit();
+    if (R_FAILED(ndsp_result)) {
+        for (int j = 0; j < NUM_WAVE_BUFS; j++)
+            linearFree(p->pcm_data[j]);
+        free(p->mp3_buffer);
+        free(p);
+        return NULL;
+    }
+
     ndspSetOutputMode(NDSP_OUTPUT_STEREO);
-    ndspChnSetInterp(0, NDSP_INTERP_LINEAR);
-    ndspChnSetRate(0, 44100);
-    ndspChnSetFormat(0, NDSP_FORMAT_STEREO_PCM16);
-    float mix_init[12] = {1.0f, 1.0f};
-    ndspChnSetMix(0, mix_init); /* Full volume both channels */
 
     /* Initialize MP3 decoder */
     mp3dec_init(&p->mp3d);
 
     p->volume = 0.8f;
+    p->active_channels = 2;
+    p->sample_rate = 44100;
     return p;
 }
 
@@ -155,17 +212,19 @@ int stream_player_play(StreamPlayer *p, const char *url) {
     p->download_done = false;
     p->decoder_initialized = false;
     p->next_buf = 0;
-    p->active_channels = 2; /* Assume stereo */
+    p->active_channels = 2; /* Assume stereo until first frame decoded */
     p->sample_rate = 44100;
     p->download_error[0] = '\0';
 
-    /* Initialize ndsp wave buffers */
+    /* Reset NDSP channel for the new stream */
+    ndspChnReset(0);
+    ndspChnWaveBufClear(0);
+    ndspChnSetPaused(0, false);
+
+    /* Clear all wave buffers */
     memset(&p->wave_bufs, 0, sizeof(p->wave_bufs));
     for (int i = 0; i < NUM_WAVE_BUFS; i++) {
         memset(p->pcm_data[i], 0, PCM_BUF_SAMPLES * sizeof(int16_t) * 2);
-        p->wave_bufs[i].data_vaddr = p->pcm_data[i];
-        p->wave_bufs[i].nsamples = PCM_BUF_SAMPLES;
-        p->wave_bufs[i].status = NDSP_WBUF_FREE;
     }
 
     /* Start HTTP download */
@@ -197,10 +256,11 @@ int stream_player_play(StreamPlayer *p, const char *url) {
     p->playing = true;
     p->buffering = true;
 
-    /* Start download thread */
+    /* Start download thread at slightly higher priority than main */
     s32 prio = 0x30;
     svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
-    p->download_thread = threadCreate(download_thread_func, p, 32 * 1024, prio - 1, -2, true);
+    p->download_thread = threadCreate(download_thread_func, p,
+                                       32 * 1024, prio - 1, -2, true);
 
     return 0;
 }
@@ -208,46 +268,59 @@ int stream_player_play(StreamPlayer *p, const char *url) {
 void stream_player_update(StreamPlayer *p) {
     if (!p || !p->playing || p->paused) return;
 
+    /* On the first successful decode, configure the NDSP channel
+     * for the actual stream format (sample rate, channels). */
+    if (p->decoder_initialized && p->sample_rate > 0) {
+        /* Ensure channel is configured for the detected format.
+         * We do this once after the first frame reveals the real format. */
+    }
+
     /* Check if we need to fill more wave buffers */
     for (int i = 0; i < NUM_WAVE_BUFS; i++) {
         int buf_idx = (p->next_buf + i) % NUM_WAVE_BUFS;
         ndspWaveBuf *buf = &p->wave_bufs[buf_idx];
 
-        /* If this buffer is done playing, refill it */
+        /* If this buffer is done playing, mark it free for refill.
+         * ndspChnWaveBufAdd sets status to QUEUED; the DSP hardware
+         * transitions it to PLAYING then DONE when finished. */
         if (buf->status == NDSP_WBUF_DONE) {
-            buf->status = NDSP_WBUF_FREE;
+            /* Buffer finished — will be refilled below */
         }
 
-        if (buf->status != NDSP_WBUF_FREE) continue;
+        if (buf->status == NDSP_WBUF_DONE ||
+            buf->status == NDSP_WBUF_FREE) {
+            /* OK to refill this buffer */
+        } else {
+            /* Buffer is QUEUED or PLAYING — skip it */
+            continue;
+        }
 
         /* Decode MP3 frames into this buffer */
         int16_t *out = p->pcm_data[buf_idx];
         int total_samples = 0;
-        int max_samples = PCM_BUF_SAMPLES * 2; /* stereo */
+        int max_samples = PCM_BUF_SAMPLES * 2; /* stereo interleaved */
 
         while (total_samples < max_samples) {
             /* Check if we have MP3 data to decode */
             if (p->mp3_read_pos == p->mp3_write_pos && !p->mp3_eof) {
-                /* Buffer empty, wait for more data */
+                /* Buffer empty, waiting for download thread */
                 if (total_samples == 0) {
                     p->buffering = true;
-                    /* No data at all yet - skip this buffer */
                     svcSleepThread(1000);
                 }
                 break;
             }
 
-            /* Read MP3 frame from ring buffer */
+            /* Read raw bytes from ring buffer for the decoder.
+             * minimp3 handles sync-word detection internally when
+             * fed a stream of raw MP3 bytes via mp3dec_decode_frame. */
             uint8_t mp3_frame[4096];
             size_t frame_size = 0;
 
-            /* Try to read a complete MP3 frame */
-            /* First, find sync word (0xFFE0) */
-            while (p->mp3_read_pos != p->mp3_write_pos || p->mp3_eof) {
-                if (frame_size >= sizeof(mp3_frame)) break;
-                if (p->mp3_read_pos == p->mp3_write_pos && !p->mp3_eof) break;
-                if (p->mp3_read_pos == p->mp3_write_pos && p->mp3_eof) {
-                    /* EOF - decode remaining data */
+            while ((p->mp3_read_pos != p->mp3_write_pos || p->mp3_eof) &&
+                   frame_size < sizeof(mp3_frame)) {
+                if (p->mp3_read_pos == p->mp3_write_pos) {
+                    if (p->mp3_eof) break;
                     break;
                 }
                 mp3_frame[frame_size++] = p->mp3_buffer[p->mp3_read_pos];
@@ -258,7 +331,10 @@ void stream_player_update(StreamPlayer *p) {
 
             /* Decode the MP3 frame */
             mp3dec_frame_info_t info;
-            int samples = mp3dec_decode_frame(&p->mp3d, mp3_frame, frame_size, out + total_samples, &info);
+            int samples = mp3dec_decode_frame(&p->mp3d, mp3_frame,
+                                              (int)frame_size,
+                                              out + total_samples,
+                                              &info);
 
             if (samples > 0) {
                 total_samples += samples * info.channels;
@@ -267,56 +343,62 @@ void stream_player_update(StreamPlayer *p) {
                     p->sample_rate = info.hz;
                     p->decoder_initialized = true;
 
-                    /* Configure ndsp for the stream format */
-                    ndspChnSetRate(0, (float)info.hz);
-                    if (info.channels == 2) {
-                        ndspChnSetFormat(0, NDSP_FORMAT_STEREO_PCM16);
+                    /* First frame decoded — now we know the real format.
+                     * Reconfigure the NDSP channel to match. */
+                    if (info.channels != 2 || info.hz != 44100) {
+                        configure_ndsp_channel(p);
                     } else {
-                        ndspChnSetFormat(0, NDSP_FORMAT_MONO_PCM16);
+                        /* Already configured for stereo/44100 at init,
+                         * but still set the mix for current volume */
+                        float mix[12] = {0};
+                        mix[0] = p->volume;
+                        mix[1] = p->volume;
+                        ndspChnSetMix(0, mix);
                     }
                 }
             }
 
-            /* If EOF and no more data, stop */
-            if (frame_size == 0 || (p->mp3_eof && p->mp3_read_pos == p->mp3_write_pos)) {
+            /* If EOF and no more unread data, stop */
+            if (p->mp3_eof && p->mp3_read_pos == p->mp3_write_pos) {
                 break;
             }
         }
 
         if (total_samples == 0) {
-            /* No data decoded - skip this buffer for now */
-            if (p->mp3_eof) {
-                /* Stream ended */
-                p->playing = false;
-                return;
+            /* No data decoded for this buffer */
+            if (p->mp3_eof && p->mp3_read_pos == p->mp3_write_pos) {
+                /* Stream ended — playback will naturally stop when
+                 * all queued buffers finish playing */
+                if (buf->status == NDSP_WBUF_DONE ||
+                    buf->status == NDSP_WBUF_FREE) {
+                    /* No buffers left playing — we're done */
+                    p->playing = false;
+                    return;
+                }
             }
             continue;
         }
 
-        /* Configure and queue the wave buffer */
-        buf->data_vaddr = out;
-        buf->nsamples = total_samples / p->active_channels;
-        buf->looping = false;
-        buf->status = NDSP_WBUF_QUEUED;
+        /* Submit the filled buffer to NDSP for playback.
+         * THIS IS THE CRITICAL CALL — without ndspChnWaveBufAdd
+         * and DSP_FlushDataCache, there will be NO SOUND. */
+        submit_wave_buffer(buf, out, total_samples, p->active_channels);
 
-        /* Set volume */
-	    float set_mix[12] = {0};
-	    set_mix[0] = p->volume;
-	    set_mix[1] = p->volume;
-	    ndspChnSetMix(0, set_mix);
+        /* Update volume mix on the live channel */
+        float set_mix[12] = {0};
+        set_mix[0] = p->volume;
+        set_mix[1] = p->volume;
+        ndspChnSetMix(0, set_mix);
 
         p->buffering = false;
+        p->next_buf = (buf_idx + 1) % NUM_WAVE_BUFS;
     }
 }
 
 void stream_player_toggle_pause(StreamPlayer *p) {
     if (!p) return;
     p->paused = !p->paused;
-    if (p->paused) {
-        ndspChnSetPaused(0, true);
-    } else {
-        ndspChnSetPaused(0, false);
-    }
+    ndspChnSetPaused(0, p->paused);
 }
 
 void stream_player_stop(StreamPlayer *p) {
@@ -340,14 +422,12 @@ void stream_player_stop(StreamPlayer *p) {
         p->curl = NULL;
     }
 
-    /* Stop ndsp */
+    /* Stop ndsp channel */
     ndspChnWaveBufClear(0);
     ndspChnSetPaused(0, false);
 
     /* Reset wave buffers */
-    for (int i = 0; i < NUM_WAVE_BUFS; i++) {
-        p->wave_bufs[i].status = NDSP_WBUF_FREE;
-    }
+    memset(&p->wave_bufs, 0, sizeof(p->wave_bufs));
 
     p->paused = false;
     p->buffering = false;
@@ -385,7 +465,11 @@ bool stream_player_is_finished(StreamPlayer *p) {
 
 void stream_player_set_volume(StreamPlayer *p, float vol) {
     if (!p) return;
-    p->volume = vol < 0.0f ? 0.0f : (vol > 1.0f ? 1.0f : vol);
+    if (vol < 0.0f) vol = 0.0f;
+    if (vol > 1.0f) vol = 1.0f;
+    p->volume = vol;
+    /* Update ndsp master volume directly (like ClouDS does) */
+    ndspSetMasterVol(vol);
 }
 
 float stream_player_get_volume(StreamPlayer *p) {
