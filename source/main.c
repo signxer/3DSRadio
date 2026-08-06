@@ -201,7 +201,9 @@ static void draw_gradient(float x, float y, float w, float h, u32 top_color, u32
     }
 }
 
-/* Draw text using global buffer */
+/* Draw text using global buffer. Uses Chinese font when available. */
+static C2D_Font active_font = NULL; /* Cached font reference */
+
 static void draw_label(float x, float y, float size, u32 color, const char *fmt, ...) {
     char buf[256];
     va_list args;
@@ -211,7 +213,14 @@ static void draw_label(float x, float y, float size, u32 color, const char *fmt,
 
     C2D_Text c2d_text;
     C2D_TextBufClear(global_text_buf);
-    C2D_TextParse(&c2d_text, global_text_buf, buf);
+
+    /* Use Chinese BCFNT font if loaded, otherwise fall back to system font */
+    if (active_font) {
+        C2D_TextFontParse(&c2d_text, active_font, global_text_buf, buf);
+    } else {
+        C2D_TextParse(&c2d_text, global_text_buf, buf);
+    }
+
     C2D_TextOptimize(&c2d_text);
     C2D_DrawText(&c2d_text, C2D_WithColor, x, y, 0.5f, size, size, color);
 }
@@ -979,8 +988,8 @@ int main(void) {
     top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
     bottom = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
 
-    /* Global text buffer */
-    global_text_buf = C2D_TextBufNew(4096);
+    /* Global text buffer - larger for CJK glyph storage */
+    global_text_buf = C2D_TextBufNew(32768);
 
     /* Initialize networking */
     net_init();
@@ -988,7 +997,10 @@ int main(void) {
 
     /* Set Chinese language and try to load Chinese font */
     locale_set_language(LANG_ZH_CN);
-    locale_init_fonts();
+    romfsInit();
+    if (locale_init_fonts()) {
+        active_font = locale_get_font();
+    }
 
     /* App state */
     memset(&app, 0, sizeof(app));
@@ -1030,6 +1042,7 @@ int main(void) {
     /* Cleanup */
     radio_exit();
     net_exit();
+    romfsExit();
     C2D_TextBufDelete(global_text_buf);
     C2D_Fini();
     C3D_Fini();

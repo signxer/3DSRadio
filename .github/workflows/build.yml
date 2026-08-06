@@ -93,6 +93,12 @@ jobs:
           print('Assets generated')
           EOF
 
+      - name: Download Chinese font (BCFNT)
+        run: |
+          curl -sSL -o romfs/chinese.bcfnt \
+            "https://raw.githubusercontent.com/Epic0522/ClouDS-Music-FA/clouds-music-fa/romfs/ui-menu-font.bcfnt"
+          ls -la romfs/chinese.bcfnt
+
       - name: Download CA certificates
         run: |
           curl -sSL -o romfs/cacert.pem https://curl.se/ca/cacert.pem
