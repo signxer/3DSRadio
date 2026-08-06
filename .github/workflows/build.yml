@@ -118,8 +118,11 @@ jobs:
           for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789·\xb7—…""''《》、。•°±×÷…—–　':
               all_chars.add(ch)
           os.makedirs('scripts', exist_ok=True)
+          # mkbcfnt -w expects whitespace-separated hex codepoints like: 0x4E2D 0x56FD
           with open('scripts/charlist.txt', 'w', encoding='utf-8') as f:
-              f.write(''.join(sorted(all_chars)))
+              for ch in sorted(all_chars):
+                  cp = ord(ch)
+                  f.write(f'0x{cp:04X} ')
           print(f'Character list: {len(all_chars)} unique glyphs')
           PYEOF
 
@@ -128,14 +131,14 @@ jobs:
           echo "=== Downloading Noto Sans SC CJK font ==="
           # Noto Sans SC Regular (SIL Open Font License 1.1 - freely redistributable)
           curl -sSL -o /tmp/NotoSansSC-Regular.ttf \
-            "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
+            "https://github.com/google/fonts/raw/main/ofl/notosanssc/static/NotoSansSC-Regular.ttf"
+          ls -la /tmp/NotoSansSC-Regular.ttf
 
           echo "=== Building BCFNT font with mkbcfnt ==="
-          # -s 14: font size 14px (good for 3DS screen)
-          # -t utf16: UTF-16 encoding (required for CJK)
-          # -l: character list for subsetting
-          mkbcfnt -o romfs/chinese.bcfnt -t utf16 -s 14 \
-            -l scripts/charlist.txt /tmp/NotoSansSC-Regular.ttf
+          # -s 16: font size 16px (good for 3DS screen)
+          # -w: whitelist file with codepoints (format: U+4E2D U+56FD ...)
+          mkbcfnt -o romfs/chinese.bcfnt -s 16 \
+            -w scripts/charlist.txt /tmp/NotoSansSC-Regular.ttf
 
           ls -la romfs/chinese.bcfnt
           echo "BCFNT font built successfully"
