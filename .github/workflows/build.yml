@@ -139,7 +139,9 @@ jobs:
           # mkbcfnt doesn't support variable font axis selection, so we
           # extract a Bold instance first. 700 weight is dramatically
           # more readable than 400 Regular on the 3DS ~132 PPI display.
-          pip install fonttools 1>&2
+          python3 -m pip install fonttools 1>&2 || \
+            (dkp-pacman -Sy --noconfirm python-pip 1>&2 && \
+             python3 -m pip install fonttools 1>&2)
           python3 << 'PYEOF'
           from fontTools.ttLib import TTFont
           from fontTools.varLib.instancer import instantiateVariableFont
