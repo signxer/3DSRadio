@@ -128,17 +128,34 @@ jobs:
 
       - name: Download CJK font and build BCFNT
         run: |
-          echo "=== Downloading Noto Sans SC CJK font ==="
-          # Noto Sans SC variable font (SIL Open Font License 1.1 - freely redistributable)
-          # Note: static/ variants don't exist in the Google Fonts repo
+          echo "=== Downloading Noto Sans SC CJK variable font ==="
+          # Noto Sans SC [wght] variable font — weight axis 100..900
+          # SIL Open Font License 1.1 — freely redistributable
           curl -sSL -o /tmp/NotoSansSC.ttf \
             "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf"
           ls -la /tmp/NotoSansSC.ttf
 
-          echo "=== Building BCFNT font with mkbcfnt ==="
+          echo "=== Extracting Bold (weight 700) static instance ==="
+          # mkbcfnt doesn't support variable font axis selection, so we
+          # extract a Bold instance first. 700 weight is dramatically
+          # more readable than 400 Regular on the 3DS ~132 PPI display.
+          pip install fonttools 1>&2
+          python3 << 'PYEOF'
+          from fontTools.ttLib import TTFont
+          from fontTools.varLib.instancer import instantiateVariableFont
+          font = TTFont('/tmp/NotoSansSC.ttf')
+          instantiateVariableFont(font, {'wght': 700}, inplace=True)
+          font.save('/tmp/NotoSansSC-Bold.ttf')
+          print(f"Bold instance saved: {font}")
+          PYEOF
+          ls -la /tmp/NotoSansSC-Bold.ttf
+
+          echo "=== Building BCFNT font (28px Bold) ==="
+          # 28px Bold on 240p (~132 PPI) gives ~11.7% screen height.
+          # Even 0.5f scale text renders at ~14px — legible for CJK.
           echo "Charlist: $(wc -w < scripts/charlist.txt) codepoints"
-          mkbcfnt -o romfs/chinese.bcfnt -s 22 \
-            -w scripts/charlist.txt /tmp/NotoSansSC.ttf
+          mkbcfnt -o romfs/chinese.bcfnt -s 28 \
+            -w scripts/charlist.txt /tmp/NotoSansSC-Bold.ttf
 
           ls -la romfs/chinese.bcfnt
           echo "BCFNT font built successfully"
