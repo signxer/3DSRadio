@@ -85,7 +85,7 @@ static size_t download_write_cb(void *contents, size_t size, size_t nmemb, void 
     return total;
 }
 
-static int download_thread_func(void *arg) {
+static void download_thread_func(void *arg) {
     StreamPlayer *p = (StreamPlayer *)arg;
     CURLcode res = curl_easy_perform(p->curl);
     if (res != CURLE_OK) {
@@ -94,7 +94,6 @@ static int download_thread_func(void *arg) {
     }
     p->mp3_eof = true;
     p->download_active = false;
-    return 0;
 }
 
 /* ======================================================================
@@ -130,7 +129,8 @@ StreamPlayer *stream_player_create(void) {
     ndspChnSetInterp(0, NDSP_INTERP_LINEAR);
     ndspChnSetRate(0, 44100);
     ndspChnSetFormat(0, NDSP_FORMAT_STEREO_PCM16);
-    ndspChnSetMix(0, 1.0f, 1.0f); /* Full volume both channels */
+    float mix_init[12] = {1.0f, 1.0f};
+    ndspChnSetMix(0, mix_init); /* Full volume both channels */
 
     /* Initialize MP3 decoder */
     mp3dec_init(&p->mp3d);
@@ -300,9 +300,10 @@ void stream_player_update(StreamPlayer *p) {
         buf->status = NDSP_WBUF_QUEUED;
 
         /* Set volume */
-        ndspChnSetMix(0, p->volume, p->volume);
-
-        ndspChnWaveBufAdd(0, buf);
+	    float set_mix[12] = {0};
+	    set_mix[0] = p->volume;
+	    set_mix[1] = p->volume;
+	    ndspChnSetMix(0, set_mix);
 
         p->buffering = false;
     }
