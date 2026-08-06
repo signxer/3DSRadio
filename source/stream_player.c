@@ -53,6 +53,14 @@ struct StreamPlayer {
     int active_channels;   /* 1 or 2 */
     int sample_rate;       /* e.g. 44100 */
 
+    /* Decode staging buffer: accumulates raw MP3 bytes from the
+     * ring buffer. After each decode, only info.frame_bytes bytes
+     * are consumed — NOT the entire read. This prevents the data
+     * discard bug that caused "chalk-writing noise." */
+    uint8_t stage[65536];
+    size_t stage_len;
+    size_t stage_off;
+
     /* State */
     volatile bool playing;
     volatile bool paused;
@@ -216,6 +224,15 @@ int stream_player_play(StreamPlayer *p, const char *url) {
     p->sample_rate = 44100;
     p->download_error[0] = '\0';
 
+    /* Reset the MP3 decoder state between streams.
+     * Without this, the synthesis filterbank carries stale
+     * state from the previous stream, causing audio artifacts. */
+    mp3dec_init(&p->mp3d);
+
+    /* Reset the decode staging buffer for the new stream */
+    p->stage_len = 0;
+    p->stage_off = 0;
+
     /* Reset NDSP channel for the new stream */
     ndspChnReset(0);
     ndspChnWaveBufClear(0);
@@ -268,11 +285,26 @@ int stream_player_play(StreamPlayer *p, const char *url) {
 void stream_player_update(StreamPlayer *p) {
     if (!p || !p->playing || p->paused) return;
 
-    /* On the first successful decode, configure the NDSP channel
-     * for the actual stream format (sample rate, channels). */
-    if (p->decoder_initialized && p->sample_rate > 0) {
-        /* Ensure channel is configured for the detected format.
-         * We do this once after the first frame reveals the real format. */
+    uint8_t *stage = p->stage;
+    size_t *stage_len = &p->stage_len;
+    size_t *stage_off = &p->stage_off;
+
+    /* Refill staging buffer from the ring buffer.
+     * Compact first: move unconsumed data to the front. */
+    if (*stage_off > 0 && *stage_off < *stage_len) {
+        memmove(stage, stage + *stage_off, *stage_len - *stage_off);
+    }
+    *stage_len -= *stage_off;
+    *stage_off = 0;
+
+    /* Read new bytes from ring buffer into the staging buffer tail */
+    while (*stage_len < sizeof(p->stage)) {
+        if (p->mp3_read_pos == p->mp3_write_pos) {
+            if (p->mp3_eof) break;
+            break;
+        }
+        stage[(*stage_len)++] = p->mp3_buffer[p->mp3_read_pos];
+        p->mp3_read_pos = (p->mp3_read_pos + 1) % DOWNLOAD_BUF_SIZE;
     }
 
     /* Check if we need to fill more wave buffers */
@@ -280,98 +312,90 @@ void stream_player_update(StreamPlayer *p) {
         int buf_idx = (p->next_buf + i) % NUM_WAVE_BUFS;
         ndspWaveBuf *buf = &p->wave_bufs[buf_idx];
 
-        /* If this buffer is done playing, mark it free for refill.
-         * ndspChnWaveBufAdd sets status to QUEUED; the DSP hardware
-         * transitions it to PLAYING then DONE when finished. */
-        if (buf->status == NDSP_WBUF_DONE) {
-            /* Buffer finished — will be refilled below */
-        }
-
-        if (buf->status == NDSP_WBUF_DONE ||
-            buf->status == NDSP_WBUF_FREE) {
-            /* OK to refill this buffer */
-        } else {
-            /* Buffer is QUEUED or PLAYING — skip it */
+        if (buf->status != NDSP_WBUF_DONE &&
+            buf->status != NDSP_WBUF_FREE) {
             continue;
         }
 
-        /* Decode MP3 frames into this buffer */
         int16_t *out = p->pcm_data[buf_idx];
         int total_samples = 0;
-        int max_samples = PCM_BUF_SAMPLES * 2; /* stereo interleaved */
+        int max_samples = PCM_BUF_SAMPLES * 2;
 
         while (total_samples < max_samples) {
-            /* Check if we have MP3 data to decode */
-            if (p->mp3_read_pos == p->mp3_write_pos && !p->mp3_eof) {
-                /* Buffer empty, waiting for download thread */
+            /* Refill staging buffer if running low */
+            if (*stage_len - *stage_off < 4096 &&
+                !(p->mp3_eof && p->mp3_read_pos == p->mp3_write_pos)) {
+                if (*stage_off > 0 && *stage_off < *stage_len) {
+                    memmove(stage, stage + *stage_off,
+                            *stage_len - *stage_off);
+                }
+                *stage_len -= *stage_off;
+                *stage_off = 0;
+
+                while (*stage_len < sizeof(p->stage)) {
+                    if (p->mp3_read_pos == p->mp3_write_pos) {
+                        if (p->mp3_eof) break;
+                        break;
+                    }
+                    stage[(*stage_len)++] = p->mp3_buffer[p->mp3_read_pos];
+                    p->mp3_read_pos = (p->mp3_read_pos + 1) % DOWNLOAD_BUF_SIZE;
+                }
+            }
+
+            if (*stage_len - *stage_off == 0) {
                 if (total_samples == 0) {
                     p->buffering = true;
-                    svcSleepThread(1000);
                 }
                 break;
             }
 
-            /* Read raw bytes from ring buffer for the decoder.
-             * minimp3 handles sync-word detection internally when
-             * fed a stream of raw MP3 bytes via mp3dec_decode_frame. */
-            uint8_t mp3_frame[4096];
-            size_t frame_size = 0;
-
-            while ((p->mp3_read_pos != p->mp3_write_pos || p->mp3_eof) &&
-                   frame_size < sizeof(mp3_frame)) {
-                if (p->mp3_read_pos == p->mp3_write_pos) {
-                    if (p->mp3_eof) break;
-                    break;
-                }
-                mp3_frame[frame_size++] = p->mp3_buffer[p->mp3_read_pos];
-                p->mp3_read_pos = (p->mp3_read_pos + 1) % DOWNLOAD_BUF_SIZE;
-            }
-
-            if (frame_size == 0) break;
-
-            /* Decode the MP3 frame */
             mp3dec_frame_info_t info;
-            int samples = mp3dec_decode_frame(&p->mp3d, mp3_frame,
-                                              (int)frame_size,
+            memset(&info, 0, sizeof(info));
+            int samples = mp3dec_decode_frame(&p->mp3d,
+                                              stage + *stage_off,
+                                              (int)(*stage_len - *stage_off),
                                               out + total_samples,
                                               &info);
 
             if (samples > 0) {
+                *stage_off += (size_t)info.frame_bytes;
                 total_samples += samples * info.channels;
+
                 if (!p->decoder_initialized) {
                     p->active_channels = info.channels;
                     p->sample_rate = info.hz;
                     p->decoder_initialized = true;
-
-                    /* First frame decoded — now we know the real format.
-                     * Reconfigure the NDSP channel to match. */
-                    if (info.channels != 2 || info.hz != 44100) {
-                        configure_ndsp_channel(p);
-                    } else {
-                        /* Already configured for stereo/44100 at init,
-                         * but still set the mix for current volume */
-                        float mix[12] = {0};
-                        mix[0] = p->volume;
-                        mix[1] = p->volume;
-                        ndspChnSetMix(0, mix);
-                    }
+                    /* Always reconfigure: ndspChnReset() defaults
+                     * may not match the actual stream format. */
+                    configure_ndsp_channel(p);
                 }
+            } else if (info.frame_bytes > 0) {
+                /* No sync found in scanned region — skip and retry */
+                *stage_off += (size_t)info.frame_bytes;
+            } else {
+                /* Need more data for a full frame */
+                break;
             }
 
-            /* If EOF and no more unread data, stop */
-            if (p->mp3_eof && p->mp3_read_pos == p->mp3_write_pos) {
+            if (p->mp3_eof && p->mp3_read_pos == p->mp3_write_pos &&
+                *stage_len - *stage_off < 1024) {
                 break;
             }
         }
 
         if (total_samples == 0) {
-            /* No data decoded for this buffer */
-            if (p->mp3_eof && p->mp3_read_pos == p->mp3_write_pos) {
-                /* Stream ended — playback will naturally stop when
-                 * all queued buffers finish playing */
-                if (buf->status == NDSP_WBUF_DONE ||
-                    buf->status == NDSP_WBUF_FREE) {
-                    /* No buffers left playing — we're done */
+            if (p->mp3_eof && p->mp3_read_pos == p->mp3_write_pos &&
+                *stage_len - *stage_off == 0) {
+                bool any_playing = false;
+                for (int j = 0; j < NUM_WAVE_BUFS; j++) {
+                    u32 status = p->wave_bufs[j].status;
+                    if (status == NDSP_WBUF_QUEUED ||
+                        status == NDSP_WBUF_PLAYING) {
+                        any_playing = true;
+                        break;
+                    }
+                }
+                if (!any_playing) {
                     p->playing = false;
                     return;
                 }
@@ -379,12 +403,8 @@ void stream_player_update(StreamPlayer *p) {
             continue;
         }
 
-        /* Submit the filled buffer to NDSP for playback.
-         * THIS IS THE CRITICAL CALL — without ndspChnWaveBufAdd
-         * and DSP_FlushDataCache, there will be NO SOUND. */
         submit_wave_buffer(buf, out, total_samples, p->active_channels);
 
-        /* Update volume mix on the live channel */
         float set_mix[12] = {0};
         set_mix[0] = p->volume;
         set_mix[1] = p->volume;
