@@ -39,6 +39,7 @@ ifneq ($(strip $(DEVKITARM)),)
                    $(ARCH) -mword-relocations -ffunction-sections \
                    -D__3DS__ -DHAVE_3DS \
                    -I$(CURDIR)/$(INCLUDES) \
+                   -I$(CURDIR)/external/minimp3 \
                    -I$(CTRULIB)/include \
                    -I$(PORTLIBS)/include
 

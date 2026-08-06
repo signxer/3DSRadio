@@ -11,6 +11,7 @@
 #include "radio_api.h"
 #include "json.h"
 #include "locale.h"
+#include "stream_player.h"
 
 /* ======================================================================
  * 3DSRadio - Flat Aero UI Design
@@ -105,6 +106,7 @@ typedef struct {
     RadioStation *current_station;
     bool is_playing;
     char stream_url[512];
+    StreamPlayer *stream_player;
     float volume;
     u32 play_start_tick;
 
@@ -747,11 +749,17 @@ static void handle_input(void) {
 
         case SCREEN_PLAYING: {
             if (kDown & KEY_A) {
-                app.is_playing = !app.is_playing;
-                set_status(app.is_playing ? "Playing" : "Paused",
-                          app.is_playing ? CLR_OK : CLR_WARN);
+                if (app.stream_player) {
+                    stream_player_toggle_pause(app.stream_player);
+                    bool paused = stream_player_is_paused(app.stream_player);
+                    set_status(paused ? "Paused" : "Playing",
+                              paused ? CLR_WARN : CLR_OK);
+                }
             }
             if (kDown & KEY_B) {
+                if (app.stream_player) {
+                    stream_player_stop(app.stream_player);
+                }
                 app.is_playing = false;
                 app.current_station = NULL;
                 memset(app.stream_url, 0, sizeof(app.stream_url));
@@ -759,10 +767,14 @@ static void handle_input(void) {
             }
             if (kDown & KEY_X) {
                 app.volume = fmax(0.0f, app.volume - 0.1f);
+                if (app.stream_player)
+                    stream_player_set_volume(app.stream_player, app.volume);
                 set_status("Volume: %.0f%%", CLR_INFO, app.volume * 100);
             }
             if (kDown & KEY_Y) {
                 app.volume = fmin(1.0f, app.volume + 0.1f);
+                if (app.stream_player)
+                    stream_player_set_volume(app.stream_player, app.volume);
                 set_status("Volume: %.0f%%", CLR_INFO, app.volume * 100);
             }
             /* Touch on control cards */
@@ -770,15 +782,28 @@ static void handle_input(void) {
                 int idx = (touch.px - 8) / 78;
                 if (idx >= 0 && idx < 4) {
                     switch (idx) {
-                        case 0: app.is_playing = !app.is_playing; break;
+                        case 0:
+                            if (app.stream_player)
+                                stream_player_toggle_pause(app.stream_player);
+                            break;
                         case 1:
+                            if (app.stream_player)
+                                stream_player_stop(app.stream_player);
                             app.is_playing = false;
                             app.current_station = NULL;
                             memset(app.stream_url, 0, sizeof(app.stream_url));
                             app.screen = SCREEN_STATION_LIST;
                             break;
-                        case 2: app.volume = fmax(0.0f, app.volume - 0.1f); break;
-                        case 3: app.volume = fmin(1.0f, app.volume + 0.1f); break;
+                        case 2:
+                            app.volume = fmax(0.0f, app.volume - 0.1f);
+                            if (app.stream_player)
+                                stream_player_set_volume(app.stream_player, app.volume);
+                            break;
+                        case 3:
+                            app.volume = fmin(1.0f, app.volume + 0.1f);
+                            if (app.stream_player)
+                                stream_player_set_volume(app.stream_player, app.volume);
+                            break;
                     }
                 }
             }
@@ -906,28 +931,36 @@ static void play_station(int index) {
     set_status("Connecting to stream...", CLR_INFO);
 
     char error[128];
+    /* Try to get stream URL from API first */
     int ret = radio_get_stream_url(app.current_station->stationuuid,
                                     app.stream_url, sizeof(app.stream_url),
                                     error, sizeof(error));
 
-    if (ret == NET_OK && strlen(app.stream_url) > 0) {
-        app.is_playing = true;
-        app.play_start_tick = svcGetSystemTick();
-        app.screen = SCREEN_PLAYING;
-        set_status("Streaming", CLR_OK);
-    } else {
+    const char *play_url = app.stream_url;
+    if (ret != NET_OK || strlen(app.stream_url) == 0) {
         if (strlen(app.current_station->url_resolved) > 0) {
             strncpy(app.stream_url, app.current_station->url_resolved, sizeof(app.stream_url) - 1);
-            app.is_playing = true;
-            app.screen = SCREEN_PLAYING;
-            set_status("Streaming (direct)", CLR_OK);
+            play_url = app.stream_url;
         } else if (strlen(app.current_station->url) > 0) {
             strncpy(app.stream_url, app.current_station->url, sizeof(app.stream_url) - 1);
-            app.is_playing = true;
-            app.screen = SCREEN_PLAYING;
-            set_status("Streaming (direct)", CLR_OK);
+            play_url = app.stream_url;
         } else {
             set_status("Failed to get stream URL", CLR_ERR);
+            return;
+        }
+    }
+
+    /* Start streaming via the stream player */
+    if (app.stream_player) {
+        stream_player_stop(app.stream_player);
+        int r = stream_player_play(app.stream_player, play_url);
+        if (r == 0) {
+            app.is_playing = true;
+            app.play_start_tick = svcGetSystemTick();
+            app.screen = SCREEN_PLAYING;
+            set_status("Streaming", CLR_OK);
+        } else {
+            set_status("Failed to start stream", CLR_ERR);
         }
     }
 }
@@ -965,10 +998,16 @@ int main(void) {
     app.highlight_dir = 1;
 
     set_status("Welcome to 3DSRadio", CLR_INFO);
+	app.stream_player = stream_player_create();
 
     /* Main loop */
     while (aptMainLoop()) {
         hidScanInput();
+	/* Update audio playback */
+	if (app.stream_player) {
+	    stream_player_update(app.stream_player);
+	    app.is_playing = stream_player_is_playing(app.stream_player);
+	}
         handle_input();
 
         app.frame_count++;
