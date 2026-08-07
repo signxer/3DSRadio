@@ -117,6 +117,26 @@ jobs:
           # Add extras for station metadata
           for ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789·\xb7—…""''《》、。•°±×÷…—–　':
               all_chars.add(ch)
+
+          # Add the FULL GB2312 simplified Chinese character set (6763 glyphs)
+          # so arbitrary Chinese text in radio station names renders instead of '?'.
+          # GB2312 is 2-byte encoded: first byte 0xA1-0xF7 (areas 1-87),
+          # second byte 0xA1-0xFE (94 positions per area).
+          #   areas  1-9:  punctuation & symbols
+          #   areas 10-15: reserved (empty)
+          #   areas 16-87: 6763 Chinese characters (level 1 + level 2)
+          # At 4bpp (A4) this only adds ~5 texture sheets (~2.6MB), so the
+          # whole font stays tiny enough for the 3DS.
+          for area in range(1, 88):
+              for pos in range(1, 95):
+                  b1 = 0xA0 + area
+                  b2 = 0xA0 + pos
+                  try:
+                      ch = bytes([b1, b2]).decode('gb2312')
+                      if len(ch) == 1:
+                          all_chars.add(ch)
+                  except Exception:
+                      pass  # undefined code point in this area
           os.makedirs('scripts', exist_ok=True)
           # mkbcfnt -w expects whitespace-separated hex codepoints like: 0x4E2D 0x56FD
           with open('scripts/charlist.txt', 'w', encoding='utf-8') as f:
