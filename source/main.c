@@ -78,8 +78,14 @@ typedef enum {
     ASYNC_LOADING,
     ASYNC_DONE,
     ASYNC_ERROR,
-    ASYNC_TIMEOUT
+    ASYNC_TIMEOUT,
+    ASYNC_CANCELLED
 } AsyncState;
+
+/* Upper bound on how long the main loop waits for a worker thread to exit
+ * before giving up and detaching it. Prevents a stuck network call (e.g.
+ * after a long stream session) from freezing the whole UI forever. */
+#define ASYNC_JOIN_TIMEOUT_NS 5000000000LL  /* 5 seconds */
 
 typedef enum {
     ASYNC_REQ_LOAD_TAGS,
@@ -102,6 +108,8 @@ typedef struct {
     Thread worker_thread;
     AsyncRequest request;
     u32 start_frame;       /* frame_count when loading began */
+    u32 load_generation;   /* bumped per load; lets an orphaned worker know
+                              it was superseded and must not publish results */
     int result_count;
     char error_msg[128];
 } AsyncLoad;
@@ -996,7 +1004,9 @@ static void handle_input(void) {
                 app.is_playing = false;
                 app.current_station = NULL;
                 memset(app.stream_url, 0, sizeof(app.stream_url));
-                app.screen = app.station_list_parent;
+                /* Back always returns to the station list we came from,
+                 * never to the tag/language category menu. */
+                app.screen = SCREEN_STATION_LIST;
             }
             if (kDown & KEY_X) {
                 app.volume = fmax(0.0f, app.volume - 0.1f);
@@ -1024,7 +1034,8 @@ static void handle_input(void) {
                             app.is_playing = false;
                             app.current_station = NULL;
                             memset(app.stream_url, 0, sizeof(app.stream_url));
-                            app.screen = app.station_list_parent;
+                            /* Same as B: back to the station list, not the category menu */
+                            app.screen = SCREEN_STATION_LIST;
                             break;
                         case 2:
                             app.volume = fmax(0.0f, app.volume - 0.1f);
@@ -1070,10 +1081,22 @@ static void handle_input(void) {
  * Worker thread — makes blocking network calls so the UI stays alive.
  * ====================================================================== */
 
+/* Cancellation callback installed in the radio layer while the worker runs.
+ * curl calls it periodically; returning non-zero aborts the transfer. */
+static int async_cancel_cb(void *data) {
+    (void)data;
+    return app.async.cancel_requested ? 1 : 0;
+}
+
 static void async_worker_thread(void *arg) {
     AsyncRequest *req = &app.async.request;
     char error[128] = {0};
     int count = 0;
+    u32 gen = app.async.load_generation;
+
+    /* The cancel hook is installed by async_launch_load (main thread) and
+     * clears in async_handle_completion; it aborts this worker's in-flight
+     * request when the user cancels or a timeout fires. */
 
     switch (req->type) {
         case ASYNC_REQ_LOAD_TAGS:
@@ -1143,9 +1166,17 @@ static void async_worker_thread(void *arg) {
         }
     }
 
-    /* Check for cancellation (B pressed during load) */
+    /* If this load was superseded (generation bumped when a new load started
+     * after we were detached on a join timeout), don't publish stale results. */
+    if (gen != app.async.load_generation) {
+        return;
+    }
+
+    /* Check for cancellation (B pressed during load). Use a dedicated state
+     * instead of going straight to IDLE so the main loop ALWAYS joins and
+     * frees this thread — no leak, and no race with the timeout path. */
     if (app.async.cancel_requested) {
-        app.async.state = ASYNC_IDLE;
+        app.async.state = ASYNC_CANCELLED;
         return;
     }
 
@@ -1201,18 +1232,44 @@ static void async_launch_load(AsyncRequestType type, const char *param) {
     app.async.cancel_requested = false;
     app.async.state = ASYNC_LOADING;
     app.async.start_frame = app.frame_count;
+    app.async.load_generation++;  /* invalidate any previously-detached worker */
+
+    /* Install the cancel hook so this load's requests can be aborted by the
+     * user (B) or by the timeout handler. Cleared in async_handle_completion. */
+    radio_set_cancel_hook(async_cancel_cb, NULL);
 
     /* Spawn worker thread (32KB stack, same as stream_player's download thread) */
     s32 prio = 0;
     svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
-    app.async.worker_thread = threadCreate(async_worker_thread, NULL, 32768,
-                                            prio - 1, -2, false);
+    Thread t = threadCreate(async_worker_thread, NULL, 32768, prio - 1, -2, false);
+    if (!t) {
+        /* Can't spawn — surface an error instead of spinning forever. */
+        app.async.worker_thread = 0;
+        snprintf(app.async.error_msg, sizeof(app.async.error_msg), "%s",
+                 locale_get_language() == LANG_ZH_CN ? "无法创建加载线程"
+                                                     : "Failed to create loader thread");
+        app.async.state = ASYNC_ERROR;
+        return;
+    }
+    app.async.worker_thread = t;
 }
 
 /* Called from main loop when worker finishes */
 static void async_handle_completion(void) {
-    threadJoin(app.async.worker_thread, U64_MAX);
-    threadFree(app.async.worker_thread);
+    Thread t = app.async.worker_thread;
+    if (t) {
+        /* Bounded join: a stuck worker (wedged network) must never freeze the
+         * main loop forever. If it doesn't exit in time, detach and let it
+         * finish on its own — the generation guard stops it from publishing
+         * stale results after a later load starts. */
+        if (threadJoin(t, ASYNC_JOIN_TIMEOUT_NS) == 0) {
+            threadFree(t);
+        }
+        app.async.worker_thread = 0;
+    }
+
+    /* This load has ended; stop cancelling requests. */
+    radio_set_cancel_hook(NULL, NULL);
 
     int count = app.async.result_count;
 
@@ -1270,6 +1327,11 @@ static void async_handle_completion(void) {
             set_status("%s", CLR_WARN,
                        locale_get_language() == LANG_ZH_CN
                            ? "请求超时" : "Request timed out");
+            break;
+
+        case ASYNC_CANCELLED:
+            /* Silent: the user backed out mid-load. Stay on the current
+             * screen; no error, no screen transition. */
             break;
 
         default:
@@ -1380,7 +1442,8 @@ int main(void) {
         /* --- Async completion check --- */
         if (app.async.state == ASYNC_DONE ||
             app.async.state == ASYNC_ERROR ||
-            app.async.state == ASYNC_TIMEOUT) {
+            app.async.state == ASYNC_TIMEOUT ||
+            app.async.state == ASYNC_CANCELLED) {
             async_handle_completion();
         }
 

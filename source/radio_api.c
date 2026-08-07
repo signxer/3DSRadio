@@ -38,6 +38,17 @@ static int current_server = 0; /* Last working server index */
 static char user_agent[64];
 static bool initialized = false;
 
+/* Cancellation hook — set by the caller before a blocking request so the
+ * underlying curl transfer can be aborted (e.g. when the user presses B
+ * during an async load). Read by radio_http_get on each request. */
+static volatile NetCancelFn s_cancel_fn = NULL;
+static void *s_cancel_data = NULL;
+
+void radio_set_cancel_hook(NetCancelFn fn, void *data) {
+    s_cancel_fn = fn;
+    s_cancel_data = data;
+}
+
 void radio_init(void) {
     snprintf(user_agent, sizeof(user_agent), "3DSRadio/1.0");
     initialized = true;
@@ -59,11 +70,18 @@ static int radio_http_get(const char *path, char **buffer, size_t *buffer_size,
     /* Try current (last known good) server first */
     int start = current_server;
     for (int i = 0; i < NUM_API_SERVERS; i++) {
+        /* Bail out promptly when the caller cancelled — don't grind through
+         * the remaining mirrors one connect-timeout at a time. */
+        if (s_cancel_fn && s_cancel_fn(s_cancel_data))
+            return NET_ERROR_CANCELLED;
+
         int idx = (start + i) % NUM_API_SERVERS;
         char url[512];
         build_url(API_SERVERS[idx], path, url, sizeof(url));
 
-        int ret = net_get(url, buffer, buffer_size, last_error, sizeof(last_error));
+        int ret = net_get_controlled(url, buffer, buffer_size,
+                                     s_cancel_fn, s_cancel_data,
+                                     last_error, sizeof(last_error));
         if (ret == NET_OK && *buffer && *buffer_size > 0) {
             /* Success - remember this server for next time */
             current_server = idx;

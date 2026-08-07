@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "net.h"   /* NetCancelFn for radio_set_cancel_hook */
 
 /* ======================================================================
  * Radio-browser.info API client
@@ -55,6 +56,11 @@ typedef struct {
 
 /* Initialize the radio API (sets up HTTP user agent, etc.) */
 void radio_init(void);
+
+/* Install a cancellation hook (NetCancelFn from net.h) so an in-flight
+ * request can be aborted from another thread. Pass NULL to clear.
+ * Used by the async loader to let a B-press / timeout cancel the request. */
+void radio_set_cancel_hook(NetCancelFn fn, void *data);
 
 /* Fetch top tags (genres). Returns count or negative on error. */
 int radio_fetch_tags(RadioTag *tags, int max_tags,
