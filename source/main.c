@@ -34,7 +34,7 @@
 #define BOT_HEIGHT 240
 
 /* Maximum items */
-#define MAX_VISIBLE_ITEMS 10
+#define MAX_VISIBLE_ITEMS 8
 #define MAX_STATIONS 100
 #define MAX_TAGS 50
 
@@ -331,33 +331,38 @@ static void draw_label(float x, float y, float size, u32 color,
 static void draw_status_bar(void) {
     select_top();
     ui_skin_draw_nine_slice(&skin, UI_SKIN_FOOTER,
-        0, TOP_HEIGHT - 20, 0.5f, TOP_WIDTH, 20, 8U, 4.0f);
+        0, TOP_HEIGHT - 26, 0.5f, TOP_WIDTH, 26, 8U, 4.0f);
     if (!skin.ready) {
-        C2D_DrawRectSolid(0, TOP_HEIGHT - 20, 0.5f, TOP_WIDTH, 20, CLR_STATUSBAR);
+        C2D_DrawRectSolid(0, TOP_HEIGHT - 26, 0.5f, TOP_WIDTH, 26, CLR_STATUSBAR);
     }
 
-    draw_label(10, TOP_HEIGHT - 18, 0.4f, CLR_TEXT_DIM, "%s", tr_about_title());
-    /* Buffer size indicator */
-    const char *buf_names[] = {tr_buffer_small(), tr_buffer_medium(), tr_buffer_large()};
-    draw_label(TOP_WIDTH/2 - 40, TOP_HEIGHT - 18, 0.35f, CLR_TEXT_DIM,
-               "%s: %s", tr_buffer_size(), buf_names[app.buffer_size]);
+    draw_label(10, TOP_HEIGHT - 21, 0.5f, CLR_TEXT_DIM, "%s", tr_about_title());
+
+    /* Center slot: transient status message while active, otherwise the
+     * buffer-size indicator. Both fit on one 0.5f line without colliding
+     * with the wifi label on the right. */
+    u64 now = svcGetSystemTick();
+    u64 elapsed = (strlen(app.status_text) > 0)
+        ? (now - app.status_time) / CPU_TICKS_PER_MSEC : 9999;
+    if (elapsed < 4000) {
+        float alpha = 1.0f;
+        if (elapsed > 3000) alpha = 1.0f - (float)(elapsed - 3000) / 1000.0f;
+        u32 c = app.status_color;
+        u8 a = (u8)((c & 0xFF) * alpha);
+        c = (c & 0xFFFFFF00) | a;
+        /* Rough centering: CJK glyphs are ~14px at 0.5f, latin narrower */
+        float tw = (float)strlen(app.status_text) * 7.0f;
+        draw_label((TOP_WIDTH - tw) / 2.0f, TOP_HEIGHT - 21, 0.5f, c,
+                   "%s", app.status_text);
+    } else {
+        const char *buf_names[] = {tr_buffer_small(), tr_buffer_medium(), tr_buffer_large()};
+        draw_label(TOP_WIDTH/2 - 40, TOP_HEIGHT - 21, 0.5f, CLR_TEXT_DIM,
+                   "%s: %s", tr_buffer_size(), buf_names[app.buffer_size]);
+    }
 
     const char *wifi_label = net_wifi_status() ? tr_wifi_connected() : tr_wifi_disconnected();
     u32 wifi_color = net_wifi_status() ? CLR_OK : CLR_ERR;
-    draw_label(TOP_WIDTH - 130, TOP_HEIGHT - 18, 0.4f, wifi_color, "%s", wifi_label);
-
-    if (strlen(app.status_text) > 0) {
-        u64 now = svcGetSystemTick();
-        u64 elapsed = (now - app.status_time) / CPU_TICKS_PER_MSEC;
-        if (elapsed < 4000) {
-            float alpha = 1.0f;
-            if (elapsed > 3000) alpha = 1.0f - (float)(elapsed - 3000) / 1000.0f;
-            u32 c = app.status_color;
-            u8 a = (u8)((c & 0xFF) * alpha);
-            c = (c & 0xFFFFFF00) | a;
-            draw_label(150, TOP_HEIGHT - 18, 0.4f, c, "%s", app.status_text);
-        }
-    }
+    draw_label(TOP_WIDTH - 130, TOP_HEIGHT - 21, 0.5f, wifi_color, "%s", wifi_label);
 }
 
 /* Top screen hero header */
@@ -367,7 +372,7 @@ static void draw_hero_header(const char *title, const char *subtitle) {
 
     draw_label(20, 10, 0.9f, CLR_TEXT, "%s", title);
     if (subtitle) {
-        draw_label(20, 34, 0.45f, CLR_TEXT_SEC, "%s", subtitle);
+        draw_label(20, 40, 0.55f, CLR_TEXT_SEC, "%s", subtitle);
     }
 }
 
@@ -432,7 +437,7 @@ static void render_tag_list(void) {
     select_bottom();
     clear_bottom();
 
-    draw_label(15, 8, 0.5f, CLR_TEXT_DIM, "%s", tr_genres_available(app.tag_count));
+    draw_label(15, 8, 0.55f, CLR_TEXT_DIM, "%s", tr_genres_available(app.tag_count));
 
     int start = app.scroll_offset;
     int end = start + MAX_VISIBLE_ITEMS;
@@ -440,11 +445,11 @@ static void render_tag_list(void) {
 
     for (int i = start; i < end; i++) {
         int idx = i - start;
-        int y = 28 + idx * 20;
+        int y = 28 + idx * 24;
         bool sel = (i == app.selection);
 
         if (sel) {
-            draw_selection(5, y - 2, BOT_WIDTH - 10, 18);
+            draw_selection(5, y - 3, BOT_WIDTH - 10, 22);
         }
 
         char label[128];
@@ -452,13 +457,13 @@ static void render_tag_list(void) {
         char count_str[16];
         snprintf(count_str, sizeof(count_str), "%d", app.tags[i].stationcount);
 
-        draw_label(15, y, 0.45f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", label);
-        draw_label(BOT_WIDTH - 50, y, 0.35f, CLR_TEXT_DIM, "%s", count_str);
+        draw_label(15, y, 0.5f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", label);
+        draw_label(BOT_WIDTH - 50, y, 0.4f, CLR_TEXT_DIM, "%s", count_str);
     }
 
     /* Hint bar using footer skin */
     draw_panel(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18);
-    draw_label(12, BOT_HEIGHT - 20, 0.35f, CLR_TEXT_DIM,
+    draw_label(12, BOT_HEIGHT - 20, 0.4f, CLR_TEXT_DIM,
                "%s", tr_nav_hint_genres());
 
     draw_status_bar();
@@ -474,7 +479,7 @@ static void render_language_list(void) {
     select_bottom();
     clear_bottom();
 
-    draw_label(15, 8, 0.5f, CLR_TEXT_DIM, "%s", tr_languages_available(app.language_count));
+    draw_label(15, 8, 0.55f, CLR_TEXT_DIM, "%s", tr_languages_available(app.language_count));
 
     int start = app.scroll_offset;
     int end = start + MAX_VISIBLE_ITEMS;
@@ -482,11 +487,11 @@ static void render_language_list(void) {
 
     for (int i = start; i < end; i++) {
         int idx = i - start;
-        int y = 28 + idx * 20;
+        int y = 28 + idx * 24;
         bool sel = (i == app.selection);
 
         if (sel) {
-            draw_selection(5, y - 2, BOT_WIDTH - 10, 18);
+            draw_selection(5, y - 3, BOT_WIDTH - 10, 22);
         }
 
         char label[128];
@@ -494,13 +499,13 @@ static void render_language_list(void) {
         char count_str[16];
         snprintf(count_str, sizeof(count_str), "%d", app.languages[i].stationcount);
 
-        draw_label(15, y, 0.45f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", label);
-        draw_label(BOT_WIDTH - 50, y, 0.35f, CLR_TEXT_DIM, "%s", count_str);
+        draw_label(15, y, 0.5f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", label);
+        draw_label(BOT_WIDTH - 50, y, 0.4f, CLR_TEXT_DIM, "%s", count_str);
     }
 
     /* Hint bar */
     draw_panel(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18);
-    draw_label(12, BOT_HEIGHT - 20, 0.35f, CLR_TEXT_DIM,
+    draw_label(12, BOT_HEIGHT - 20, 0.4f, CLR_TEXT_DIM,
                "%s", tr_nav_hint_languages());
 
     draw_status_bar();
@@ -522,28 +527,28 @@ static void render_station_list(void) {
 
     for (int i = start; i < end; i++) {
         int idx = i - start;
-        int y = 5 + idx * 22;
+        int y = 5 + idx * 26;
         bool sel = (i == app.selection);
 
         if (sel) {
-            draw_selection(3, y, BOT_WIDTH - 6, 20);
+            draw_selection(3, y - 1, BOT_WIDTH - 6, 24);
         }
 
         RadioStation *s = &app.stations[i];
 
-        /* Station name */
-        char name_buf[36];
+        /* Station name — keep it clear of the bitrate badge on the right */
+        char name_buf[24];
         size_t name_len = strlen(s->name);
-        if (name_len > 30) {
-            memcpy(name_buf, s->name, 28);
-            name_buf[28] = '.';
-            name_buf[29] = '.';
-            name_buf[30] = '.';
-            name_buf[31] = '\0';
+        if (name_len > 18) {
+            memcpy(name_buf, s->name, 16);
+            name_buf[16] = '.';
+            name_buf[17] = '.';
+            name_buf[18] = '.';
+            name_buf[19] = '\0';
         } else {
             strcpy(name_buf, s->name);
         }
-        draw_label(12, y + 1, 0.4f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", name_buf);
+        draw_label(12, y + 2, 0.5f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", name_buf);
 
         /* Bitrate + codec badge using skin dot */
         if (s->bitrate > 0) {
@@ -551,8 +556,8 @@ static void render_station_list(void) {
             snprintf(badge, sizeof(badge), "%d kbps", s->bitrate);
             /* Small accent dot before bitrate */
             ui_skin_draw_tinted(&skin, UI_SKIN_DOT_CYAN,
-                BOT_WIDTH - 72, y + 3, 0.5f, 10, 10, CLR_ACCENT);
-            draw_label(BOT_WIDTH - 60, y + 1, 0.3f, CLR_ACCENT, "%s", badge);
+                BOT_WIDTH - 72, y + 4, 0.5f, 10, 10, CLR_ACCENT);
+            draw_label(BOT_WIDTH - 60, y + 2, 0.35f, CLR_ACCENT, "%s", badge);
         }
     }
 
@@ -588,9 +593,9 @@ static void render_playing(void) {
             strncpy(first_tag, app.current_station->tags, 20);
         }
         if (strlen(first_tag) > 0) {
-            float tag_w = strlen(first_tag) * 6.0f + 16.0f;
-            draw_button(20, 62, tag_w, 22, false);
-            draw_label(28, 65, 0.4f, CLR_TEXT, "%s", first_tag);
+            float tag_w = strlen(first_tag) * 7.0f + 16.0f;
+            draw_button(20, 66, tag_w, 24, false);
+            draw_label(28, 71, 0.45f, CLR_TEXT, "%s", first_tag);
         }
     }
 
@@ -605,10 +610,10 @@ static void render_playing(void) {
     } else {
         snprintf(info, sizeof(info), "%s", tr_internet_radio());
     }
-    draw_label(20, 95, 0.45f, CLR_TEXT_SEC, "%s", info);
+    draw_label(20, 96, 0.5f, CLR_TEXT_SEC, "%s", info);
 
     /* Votes */
-    draw_label(20, 118, 0.35f, CLR_TEXT_DIM, "%s",
+    draw_label(20, 112, 0.4f, CLR_TEXT_DIM, "%s",
                tr_votes_clicks(app.current_station->votes, app.current_station->clickcount));
 
     /* Visualizer area - animated bars */
@@ -638,14 +643,14 @@ static void render_playing(void) {
     /* Playing/Paused indicator with skin dot */
     ui_skin_draw_tinted(&skin,
         app.is_playing ? UI_SKIN_DOT_GREEN : UI_SKIN_DOT_ORANGE,
-        20, TOP_HEIGHT - 48, 0.5f, 12, 12,
+        20, TOP_HEIGHT - 52, 0.5f, 12, 12,
         app.is_playing ? CLR_OK : CLR_WARN);
-    draw_label(38, TOP_HEIGHT - 45, 0.5f,
+    draw_label(38, TOP_HEIGHT - 49, 0.55f,
                app.is_playing ? CLR_OK : CLR_WARN,
                "%s", app.is_playing ? tr_now_playing() : tr_paused());
 
     /* Volume */
-    draw_label(TOP_WIDTH - 80, TOP_HEIGHT - 45, 0.35f, CLR_TEXT_DIM,
+    draw_label(TOP_WIDTH - 90, TOP_HEIGHT - 49, 0.45f, CLR_TEXT_DIM,
                "%s", tr_volume_level((int)(app.volume * 100)));
 
     /* Progress bar using skin */
@@ -657,7 +662,7 @@ static void render_playing(void) {
     select_bottom();
     clear_bottom();
 
-    draw_label(15, 12, 0.5f, CLR_TEXT_SEC, "%s", tr_controls());
+    draw_label(15, 12, 0.55f, CLR_TEXT_SEC, "%s", tr_controls());
 
     /* Control buttons as skin-based buttons */
     struct { const char *label; const char *key; u32 color; } controls[] = {
@@ -671,8 +676,8 @@ static void render_playing(void) {
         int x = 8 + i * 78;
         int y = 45;
         draw_button(x, y, 72, 55, false);
-        draw_label(x + 10, y + 18, 0.55f, controls[i].color, "%s", controls[i].key);
-        draw_label(x + 10, y + 38, 0.35f, CLR_TEXT_DIM, "%s", controls[i].label);
+        draw_label(x + 10, y + 17, 0.6f, controls[i].color, "%s", controls[i].key);
+        draw_label(x + 10, y + 38, 0.45f, CLR_TEXT_DIM, "%s", controls[i].label);
     }
 
     /* Stream info panel */
@@ -688,9 +693,9 @@ static void render_playing(void) {
         } else {
             strcpy(url_display, app.stream_url);
         }
-        draw_panel(8, 120, BOT_WIDTH - 16, 35);
-        draw_label(15, 128, 0.3f, CLR_TEXT_DIM, "%s", tr_stream_url());
-        draw_label(15, 140, 0.3f, CLR_ACCENT, "%s", url_display);
+        draw_panel(8, 118, BOT_WIDTH - 16, 42);
+        draw_label(15, 126, 0.4f, CLR_TEXT_DIM, "%s", tr_stream_url());
+        draw_label(15, 140, 0.4f, CLR_ACCENT, "%s", url_display);
     }
 
     draw_status_bar();
@@ -883,7 +888,7 @@ static void handle_input(void) {
                 }
             }
             if (touch_active && touch.py >= 28) {
-                int idx = (touch.py - 28) / 20 + app.scroll_offset;
+                int idx = (touch.py - 28) / 24 + app.scroll_offset;
                 if (idx >= 0 && idx < app.tag_count) {
                     app.selection = idx;
                     if (touch.px >= 5 && touch.px <= BOT_WIDTH - 5)
@@ -918,7 +923,7 @@ static void handle_input(void) {
                 }
             }
             if (touch_active && touch.py >= 28) {
-                int idx = (touch.py - 28) / 20 + app.scroll_offset;
+                int idx = (touch.py - 28) / 24 + app.scroll_offset;
                 if (idx >= 0 && idx < app.language_count) {
                     app.selection = idx;
                     if (touch.px >= 5 && touch.px <= BOT_WIDTH - 5)
@@ -953,7 +958,7 @@ static void handle_input(void) {
                 }
             }
             if (touch_active && touch.py >= 5) {
-                int idx = (touch.py - 5) / 22 + app.scroll_offset;
+                int idx = (touch.py - 5) / 26 + app.scroll_offset;
                 if (idx >= 0 && idx < app.station_count) {
                     app.selection = idx;
                     if (touch.px >= 3 && touch.px <= BOT_WIDTH - 3)
@@ -1314,7 +1319,7 @@ static void render_loading_spinner(void) {
         case ASYNC_REQ_SEARCH:           msg = tr_loading(); break;
         case ASYNC_REQ_PLAY_STATION:     msg = tr_connecting_stream(); break;
     }
-    draw_label(cx - 80, cy + 30, 0.4f, CLR_TEXT,
+    draw_label(cx - 80, cy + 32, 0.5f, CLR_TEXT,
                "%-24s", msg);  /* pad for consistent textbuf lifetime */
 }
 
