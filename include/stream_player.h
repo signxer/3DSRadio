@@ -39,7 +39,8 @@ void stream_player_stop(StreamPlayer *player);
 /* Destroy player and free all resources */
 void stream_player_destroy(StreamPlayer *player);
 
-/* Must be called each frame in main loop - decodes audio, feeds ndsp */
+/* Kept for main-loop compatibility. Decoding now runs on a dedicated
+ * decode thread inside the player, so this is a lightweight no-op. */
 void stream_player_update(StreamPlayer *player);
 
 /* State queries */
