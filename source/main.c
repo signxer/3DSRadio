@@ -15,15 +15,16 @@
 #include "ui_skin.h"
 
 /* ======================================================================
- * 3DSRadio - Flat Aero UI Design
+ * 3DSRadio - Apple-Light UI Design
  * Skin-based rendering powered by ClouDS-Music-FA texture atlas
  *
  * Design philosophy:
- * - Texture atlas (ui-skin-dark.png) for all UI chrome
+ * - Texture atlas (ui-skin-light.png) for all UI chrome
  * - Nine-slice scaling for buttons, panels, headers, selections
  * - Top screen: content/art/visualization (hero)
  * - Bottom screen: navigation/lists/controls (functional)
- * - Dark theme with skin-based depth and layered rendering
+ * - Light theme: dark text on light for maximum legibility at 3DS PPI
+ * - Single semantic accent (systemBlue) + iOS status colors
  * - Touch + button dual input
  * ====================================================================== */
 
@@ -39,33 +40,35 @@
 #define MAX_TAGS 50
 
 /* ======================================================================
- * Flat Aero Color Palette
+ * Apple-Light Color Palette
+ * Inspired by iOS system colors — dark text on light for 3DS readability.
+ * C2D_Color32(r,g,b,a) guarantees correct PICA200 RGBA8 byte order.
  * ====================================================================== */
 
-/* Background layers - deep dark for contrast with skin chrome */
-#define CLR_BG_TOP      0xFF1C1C2E  /* Deep navy top screen */
-#define CLR_BG_BOT      0xFF16162A  /* Slightly deeper bottom */
-#define CLR_SURFACE     0xFF2A2A40  /* Card/surface background (fallback) */
-#define CLR_SURFACE_LT  0xFF353550  /* Lighter surface for hover (fallback) */
+/* Background layers — light, paper-like */
+#define CLR_BG_TOP      C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF)  /* systemGray6 */
+#define CLR_BG_BOT      C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF)  /* White */
+#define CLR_SURFACE     C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF)  /* White card */
+#define CLR_SURFACE_LT  C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF)  /* Light gray hover */
 
-/* Text */
-#define CLR_TEXT        0xFFF0F0F0  /* Primary text - near white */
-#define CLR_TEXT_SEC    0xFFA0A0B8  /* Secondary text - muted */
-#define CLR_TEXT_DIM    0xFF686880  /* Dim text - hints */
+/* Text — dark for high contrast on light */
+#define CLR_TEXT        C2D_Color32(0x1C, 0x1C, 0x1E, 0xFF)  /* systemLabel */
+#define CLR_TEXT_SEC    C2D_Color32(0x48, 0x48, 0x4A, 0xFF)  /* secondaryLabel */
+#define CLR_TEXT_DIM    C2D_Color32(0x8E, 0x8E, 0x93, 0xFF)  /* systemGray */
 
-/* Accent colors */
-#define CLR_ACCENT      0xFF5C9EFF  /* Soft blue accent */
-#define CLR_ACCENT2     0xFF7C5CFF  /* Purple secondary accent */
-#define CLR_ACCENT3     0xFFFF6B6B  /* Warm red accent */
+/* Accent — single semantic accent (systemBlue) */
+#define CLR_ACCENT      C2D_Color32(0x00, 0x7A, 0xFF, 0xFF)  /* Blue accent */
+#define CLR_ACCENT2     C2D_Color32(0xAF, 0x52, 0xDE, 0xFF)  /* Purple (volume+) */
+#define CLR_ACCENT3     C2D_Color32(0xFF, 0x3B, 0x30, 0xFF)  /* Red (stop/back) */
 
-/* Status */
-#define CLR_OK          0xFF4CD964  /* Green */
-#define CLR_ERR         0xFFFF3B30  /* Red */
-#define CLR_WARN        0xFFFFCC00  /* Yellow */
-#define CLR_INFO        0xFF5AC8FA  /* Blue */
+/* Status — semantic iOS system colors */
+#define CLR_OK          C2D_Color32(0x34, 0xC7, 0x59, 0xFF)  /* systemGreen */
+#define CLR_ERR         C2D_Color32(0xFF, 0x3B, 0x30, 0xFF)  /* systemRed */
+#define CLR_WARN        C2D_Color32(0xFF, 0x95, 0x00, 0xFF)  /* systemOrange */
+#define CLR_INFO        C2D_Color32(0x00, 0x7A, 0xFF, 0xFF)  /* systemBlue */
 
-/* Status bar */
-#define CLR_STATUSBAR   0xFF111122  /* Dark status bar */
+/* Status bar — subtle light gray distinction */
+#define CLR_STATUSBAR   C2D_Color32(0xE5, 0xE5, 0xEA, 0xFF)  /* systemGray4 */
 
 /* ======================================================================
  * Async Loading System
@@ -190,7 +193,7 @@ static C3D_RenderTarget *bottom = NULL;
 static UiSkin skin;
 
 /* ======================================================================
- * Drawing Primitives - Skin-based Flat Aero Style
+ * Drawing Primitives - Skin-based Apple-Light Style
  * ====================================================================== */
 
 /* Pre-allocated text buffer for efficiency */
@@ -376,7 +379,7 @@ static void draw_status_bar(void) {
 /* Top screen hero header */
 static void draw_hero_header(const char *title, const char *subtitle) {
     select_top();
-    draw_gradient(0, 0, TOP_WIDTH, 60, 0x2A2A44FF, 0x1C1C2E00);
+    draw_gradient(0, 0, TOP_WIDTH, 60, 0xFFFFFFFF, 0x00000000);
 
     draw_label(20, 10, 0.9f, CLR_TEXT, "%s", title);
     if (subtitle) {
@@ -393,7 +396,7 @@ static void render_main_menu(void) {
     clear_top();
 
     /* Hero area with gradient */
-    draw_gradient(0, 0, TOP_WIDTH, 120, 0x25253DFF, 0x1C1C2E00);
+    draw_gradient(0, 0, TOP_WIDTH, 120, 0xFFFFFF20, 0x00000000);
 
     /* App logo area using panel skin */
     draw_panel(TOP_WIDTH/2 - 50, 25, 100, 100);
@@ -1365,7 +1368,7 @@ static void render_loading_spinner(void) {
 
         /* Alpha fades based on position — chasing-dots effect */
         u8 alpha = (u8)(55 + (200 * i / 8));
-        u32 color = C2D_Color32(0xFF, 0x44, 0x44, alpha);
+        u32 color = C2D_Color32(0x00, 0x7A, 0xFF, alpha);  /* accent blue, not error red */
 
         C2D_DrawCircleSolid(cx + dx, cy + dy, 0.5f, 4, color);
     }
@@ -1415,7 +1418,7 @@ int main(void) {
 
     /* Load UI skin texture atlas */
     ui_skin_init(&skin);
-    if (!ui_skin_load(&skin, "romfs:/ui-skin-dark.png")) {
+    if (!ui_skin_load(&skin, "romfs:/ui-skin-light.png")) {
         /* Skin load failed — will use solid-color fallbacks throughout */
         set_status("%s", CLR_WARN, tr_skin_fallback());
     }
