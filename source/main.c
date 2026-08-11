@@ -287,8 +287,6 @@ static void draw_selection(float x, float y, float w, float h) {
     if (!ok) {
         C2D_DrawRectSolid(x, y, 0.5f, w, h, CLR_SURFACE_LT);
     }
-    /* Left edge accent bar */
-    C2D_DrawRectSolid(x, y + 2, 0.5f, 3.0f, h - 4, CLR_ACCENT);
 }
 
 /* Draw a header/title bar */
@@ -422,10 +420,6 @@ static void render_main_menu(void) {
         bool sel = (i == app.selection);
 
         draw_button(10, y, BOT_WIDTH - 20, 34, sel);
-
-        if (sel) {
-            C2D_DrawRectSolid(10, y, 0.5f, 3, 34, CLR_ACCENT);
-        }
 
         draw_label(22, y + 7, 0.5f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", items[i]);
         draw_label(BOT_WIDTH - 30, y + 7, 0.5f, CLR_TEXT_DIM, ">");
