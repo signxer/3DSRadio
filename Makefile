@@ -6,7 +6,7 @@ TITLE          := 3DSRadio
 DESCRIPTION    := Internet Radio Player
 AUTHOR         := 3DSRadio
 VERSION_MAJOR  := 1
-VERSION_MINOR  := 0
+VERSION_MINOR  := 1
 VERSION_MICRO  := 0
 PRODUCT_CODE   := CTR-RADIO
 UNIQUE_ID      := 0x7F500
@@ -40,6 +40,7 @@ ifneq ($(strip $(DEVKITARM)),)
                    -D__3DS__ -DHAVE_3DS \
                    -I$(CURDIR)/$(INCLUDES) \
                    -I$(CURDIR)/external/minimp3 \
+                   -I$(CURDIR)/external \
                    -I$(CTRULIB)/include \
                    -I$(PORTLIBS)/include
 

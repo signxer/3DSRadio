@@ -38,8 +38,13 @@ int net_init(void) {
         fclose(ca_file);
     }
 
-    /* Initialize wireless AC service (not fatal if it fails) */
-    acInit();
+    /* Initialize wireless AC service.  A failed AC service means the
+     * application cannot make a meaningful Wi-Fi request, so report it to
+     * the caller instead of pretending the network is ready. */
+    Result ac_result = acInit();
+    if (R_FAILED(ac_result)) {
+        return NET_ERROR_TRANSPORT;
+    }
 
     /* Allocate SOC buffer with proper 0x1000-byte alignment.
      * ClouDS-Music-FA uses memalign for this — linearAlloc only
@@ -47,6 +52,7 @@ int net_init(void) {
      * the heap when we pass the full SOC_BUFFER_SIZE. */
     soc_buffer = (u32 *)memalign(SOC_ALIGN, SOC_BUFFER_SIZE);
     if (!soc_buffer) {
+        acExit();
         return NET_ERROR_MEMORY;
     }
 
@@ -54,12 +60,14 @@ int net_init(void) {
     if (R_FAILED(ret)) {
         free(soc_buffer);
         soc_buffer = NULL;
+        acExit();
         return NET_ERROR_TRANSPORT;
     }
 
     CURLcode code = curl_global_init(CURL_GLOBAL_DEFAULT);
     if (code != CURLE_OK) {
         socExit();
+        acExit();
         free(soc_buffer);
         soc_buffer = NULL;
         return NET_ERROR_TRANSPORT;
@@ -88,14 +96,9 @@ void net_exit(void) {
  * ====================================================================== */
 
 bool net_wifi_status(void) {
-    /* In emulators, ACU_GetWifiStatus may return 0 even when networking
-     * works through host passthrough. If SOC is initialized, assume
-     * network is available. */
-    if (net_initialized) return true;
-
     u32 wifi_status = 0;
     Result result = ACU_GetWifiStatus(&wifi_status);
-    if (R_FAILED(result)) return false;
+    if (R_FAILED(result)) return net_initialized;
     return wifi_status != 0;
 }
 
@@ -168,7 +171,7 @@ static CURL *setup_curl(const char *url, NetCancelFn cancel, void *cancel_data) 
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_USERAGENT,
-                     "3DSRadio/1.0 (Nintendo 3DS)");
+                     "3DSRadio/1.1 (Nintendo 3DS)");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);

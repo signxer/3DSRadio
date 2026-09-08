@@ -185,6 +185,10 @@ jobs:
           make -j$(nproc)
           ls -la *.3dsx *.elf
 
+      - name: Run host logic tests
+        run: |
+          ./scripts/test_host.sh
+
       - name: Build CIA (if tools available)
         run: |
           if command -v bannertool &>/dev/null && command -v makerom &>/dev/null; then

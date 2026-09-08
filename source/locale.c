@@ -304,7 +304,7 @@ const char *tr_station_details(void) {
 }
 
 const char *tr_about_tagline(void) {
-    return is_chinese() ? "3DSRadio v1.0 - 皮肤驱动界面" : "3DSRadio v1.0 - Skin-powered UI";
+    return is_chinese() ? "3DSRadio v1.1 - 双主题网络收音机" : "3DSRadio v1.1 - Dual-theme internet radio";
 }
 
 const char *tr_volume_level(int pct) {
@@ -442,4 +442,68 @@ const char *tr_languages_loaded(int count) {
         snprintf(buf, sizeof(buf), "%d languages loaded", count);
     }
     return buf;
+}
+
+const char *tr_menu_settings(void) {
+    return is_chinese() ? "设置" : "Settings";
+}
+
+const char *tr_settings_header(void) {
+    return is_chinese() ? "设置" : "Settings";
+}
+
+const char *tr_theme(void) {
+    return is_chinese() ? "主题" : "Theme";
+}
+
+const char *tr_theme_light(void) {
+    return is_chinese() ? "浅色" : "Light";
+}
+
+const char *tr_theme_dark(void) {
+    return is_chinese() ? "深色" : "Dark";
+}
+
+const char *tr_language_auto(void) {
+    return is_chinese() ? "自动" : "Auto";
+}
+
+const char *tr_language_english(void) {
+    return is_chinese() ? "English" : "English";
+}
+
+const char *tr_language_chinese(void) {
+    return is_chinese() ? "中文" : "Chinese";
+}
+
+const char *tr_saved(void) {
+    return is_chinese() ? "设置已保存" : "Settings saved";
+}
+
+const char *tr_buffering(void) {
+    return is_chinese() ? "缓冲中" : "Buffering";
+}
+
+const char *tr_reconnecting(void) {
+    return is_chinese() ? "重新连接中" : "Reconnecting";
+}
+
+const char *tr_stream_ended(void) {
+    return is_chinese() ? "播放已结束" : "Stream ended";
+}
+
+const char *tr_codec_unsupported(void) {
+    return is_chinese() ? "暂不支持此音频格式" : "This audio format is not supported";
+}
+
+const char *tr_no_stations(void) {
+    return is_chinese() ? "没有找到电台" : "No stations found";
+}
+
+const char *tr_retry(void) {
+    return is_chinese() ? "重试" : "Retry";
+}
+
+const char *tr_audio_init_failed(void) {
+    return is_chinese() ? "音频初始化失败" : "Audio initialization failed";
 }

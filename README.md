@@ -10,6 +10,9 @@ A native homebrew internet radio client for the Nintendo 3DS, powered by [radio-
 - Play internet radio streams
 - Now Playing screen with station info
 - Full dual-screen interface
+- Light and dark themes with saved preferences
+- Touch search keyboard with QWERTY/symbol layouts and a paged Chinese pinyin candidate set
+- MP3 and OGG/Vorbis playback with prebuffering, ICY stripping, and retry
 
 ## Prerequisites
 
@@ -59,13 +62,33 @@ make cia
 - **Libraries:** citro2d, citro3d, libcurl, mbedtls, ctru
 - **API:** radio-browser.info (open, free)
 - **Audio:** ndsp (hardware audio)
+- **Audio formats:** MP3 (minimp3), OGG/Vorbis (stb_vorbis); AAC is reported as unsupported unless an AAC backend is added to the toolchain
+- **Buffering:** dedicated download/decode threads, prebuffer hysteresis, ICY metadata stripping, and six-wave weak-Wi-Fi preset
 - **Format:** 3DSX / CIA
+
+## Playback and troubleshooting
+
+The player waits for a small prebuffer before starting and automatically retries
+transient stream failures up to three times. The Settings screen can switch
+between small, medium, and large buffers; use the large buffer on unstable WiFi.
+
+Radio-browser lists stations in many formats. MP3 and OGG/Vorbis are playable in
+the current build. AAC stations remain visible with an explicit unsupported
+badge instead of entering a silent playback state.
+
+Preferences are saved to `sdmc:/3ds/3DSRadio/settings.cfg` when the Settings
+screen is changed.
+
+Genres, languages, and the top-stations page are cached for the current
+session to avoid repeating the same network request.
 
 ## Credits
 
 - [radio-browser.info](https://www.radio-browser.info/) for the station database API
 - [devkitPro](https://devkitpro.org/) for the 3DS homebrew toolchain
-- [ClouDS-Music](https://github.com/cadl/ClouDS-Music) for architecture reference
+- [stb_vorbis](https://github.com/nothings/stb) for the public-domain OGG/Vorbis decoder
+- [ClouDS-Music-FA](https://github.com/Epic0522/ClouDS-Music-FA) for the progressive playback, keyboard, candidate layout, and aero UI reference
+- See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for reused component and asset attribution
 
 ## License
 

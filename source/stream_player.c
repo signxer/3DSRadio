@@ -4,7 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <curl/curl.h>
+
+#include "ogg_decoder.h"
 
 /* minimp3 decoder - single header library */
 #define MINIMP3_IMPLEMENTATION
@@ -18,7 +21,7 @@
  * Streaming Audio Player
  *
  * Architecture:
- * - Download thread pulls raw MP3 bytes from the HTTP stream into a ring
+ * - Download thread pulls raw stream bytes from the HTTP stream into a ring
  *   buffer. It runs at LOWER priority than the main thread and NEVER drops
  *   bytes (it throttles instead), so it can't outpace the decoder and
  *   corrupt the MP3 stream with gaps.
@@ -29,12 +32,17 @@
  *   stall let the DSP underrun — the "stutter/squeak" that buffer size
  *   alone cannot fix.)
  * - Priority order:  decode thread > main (render) > download thread
+ *
+ * The six-wave large preset and explicit prebuffer gate follow the proven
+ * progressive-player approach used by ClouDS-Music-FA, adapted here for a
+ * never-ending live radio stream rather than a finite local file.
  * ====================================================================== */
 
-#define NUM_WAVE_BUFS_MAX 5
+#define NUM_WAVE_BUFS_MAX 6
 #define PCM_BUF_SAMPLES_MAX 16384  /* Max samples per wave buffer (per channel) */
 #define DOWNLOAD_BUF_MAX (512 * 1024)  /* 512 KB max raw MP3 download buffer */
 #define STAGE_BUF_MAX 131072  /* 128 KB max staging buffer */
+#define STREAM_MAX_RETRIES 3
 
 /* Buffer size presets (indexed by StreamBufSize enum) */
 static const struct {
@@ -42,10 +50,13 @@ static const struct {
     int pcm_buf_samples;
     size_t download_buf_size;
     size_t stage_buf_size;
+    size_t prebuffer_bytes;
 } buf_configs[] = {
-    [STREAM_BUF_SMALL]  = { 3,  4096, 128 * 1024, 32768  },
-    [STREAM_BUF_MEDIUM] = { 4,  8192, 256 * 1024, 65536  },
-    [STREAM_BUF_LARGE]  = { 5, 16384, 512 * 1024, 131072 },
+    [STREAM_BUF_SMALL]  = { 3,  4096, 128 * 1024, 32768,  16 * 1024 },
+    [STREAM_BUF_MEDIUM] = { 4,  8192, 256 * 1024, 65536,  32 * 1024 },
+    /* Six queued waves follows the reference player's queue depth.  The
+     * extra wave is deliberately kept only for the large/weak-WiFi preset. */
+    [STREAM_BUF_LARGE]  = { 6, 16384, 512 * 1024, 131072, 64 * 1024 },
 };
 
 struct StreamPlayer {
@@ -54,16 +65,21 @@ struct StreamPlayer {
     int num_wave_bufs;
     int pcm_buf_samples;
     size_t download_buf_size;
+    size_t prebuffer_bytes;
 
     /* Download state */
     volatile bool download_active;
     volatile bool download_done;
     Thread download_thread;
     char download_error[256];
+    char last_url[512];
+    StreamCodec codec;
+    volatile StreamPlayerState state;
+    int retry_count;
 
     /* Incremented on every stream; lets a stale (leaked) download thread
      * from a previous stream detect that its ring buffer is gone. */
-    u32 stream_epoch;
+    volatile u32 stream_epoch;
 
     /* Raw MP3 ring buffer */
     uint8_t *mp3_buffer;
@@ -73,7 +89,9 @@ struct StreamPlayer {
 
     /* Decoder */
     mp3dec_t mp3d;
+    OggDecoder oggd;
     bool decoder_initialized;
+    unsigned int decoder_no_progress;
 
     /* NDSP audio output */
     ndspWaveBuf wave_bufs[NUM_WAVE_BUFS_MAX];
@@ -97,7 +115,53 @@ struct StreamPlayer {
     volatile bool paused;
     volatile bool buffering;
     float volume;
+    size_t icy_metaint;
+    size_t icy_audio_remaining;
+    size_t icy_metadata_remaining;
 };
+
+static void memory_barrier(void) {
+    __sync_synchronize();
+}
+
+static size_t ring_available(const StreamPlayer *p) {
+    size_t write;
+    size_t read;
+    if (!p || p->download_buf_size == 0) return 0;
+    memory_barrier();
+    write = p->mp3_write_pos;
+    read = p->mp3_read_pos;
+    return (write + p->download_buf_size - read) % p->download_buf_size;
+}
+
+static size_t ring_free(const StreamPlayer *p) {
+    if (!p || p->download_buf_size < 2) return 0;
+    return p->download_buf_size - ring_available(p) - 1;
+}
+
+static StreamCodec codec_from_string(const char *codec) {
+    if (!codec || !codec[0] || strcasecmp(codec, "MP3") == 0 ||
+        strcasecmp(codec, "MPEG") == 0 || strcasecmp(codec, "MPEG AUDIO") == 0)
+        return STREAM_CODEC_MP3;
+    if (strcasecmp(codec, "OGG") == 0 || strcasecmp(codec, "VORBIS") == 0 ||
+        strcasecmp(codec, "OGG VORBIS") == 0)
+        return STREAM_CODEC_OGG;
+    if (strcasecmp(codec, "AAC") == 0 || strcasecmp(codec, "AAC+") == 0 ||
+        strcasecmp(codec, "HE-AAC") == 0)
+        return STREAM_CODEC_AAC;
+    return STREAM_CODEC_UNKNOWN;
+}
+
+static void set_player_error(StreamPlayer *p, const char *message) {
+    if (!p) return;
+    snprintf(p->download_error, sizeof(p->download_error), "%s",
+             message && message[0] ? message : "Unknown audio error");
+    p->playing = false;
+    p->download_active = false;
+    p->buffering = false;
+    memory_barrier();
+    p->state = STREAM_STATE_ERROR;
+}
 
 /* Write callback context for the curl download */
 struct DownloadCtx {
@@ -105,12 +169,33 @@ struct DownloadCtx {
     u32 epoch; /* stream_epoch captured when the download started */
 };
 
+static size_t stream_header_cb(char *buffer, size_t size, size_t nitems,
+                               void *userdata) {
+    struct DownloadCtx *ctx = (struct DownloadCtx *)userdata;
+    size_t length = size * nitems;
+    const char *prefix = "icy-metaint:";
+    char header[128];
+    size_t copy = length < sizeof(header) - 1 ? length : sizeof(header) - 1;
+    memcpy(header, buffer, copy);
+    header[copy] = '\0';
+    if (copy > strlen(prefix) && strncasecmp(header, prefix, strlen(prefix)) == 0) {
+        unsigned long value = strtoul(header + strlen(prefix), NULL, 10);
+        if (value > 0 && value < 1024 * 1024) {
+            ctx->player->icy_metaint = (size_t)value;
+            ctx->player->icy_audio_remaining = (size_t)value;
+            ctx->player->icy_metadata_remaining = 0;
+        }
+    }
+    return length;
+}
+
 /* Arguments captured at thread creation so the download thread owns its own
  * curl handle and context, and can free them at exit without reading shared
  * player state (a stale thread must never touch a newer stream's curl). */
 struct DownloadThreadArg {
     StreamPlayer *player;
     CURL *curl;
+    struct curl_slist *headers;
     struct DownloadCtx *ctx;
 };
 
@@ -140,9 +225,13 @@ static void ring_to_stage(StreamPlayer *p) {
     size_t free_space = sizeof(p->stage) - *stage_len;
     if (free_space == 0) return;
 
-    size_t write = p->mp3_write_pos;
-    size_t read  = p->mp3_read_pos;
-    size_t avail = (write + p->download_buf_size - read) % p->download_buf_size;
+    size_t write;
+    size_t read;
+    size_t avail;
+    memory_barrier();
+    write = p->mp3_write_pos;
+    read = p->mp3_read_pos;
+    avail = (write + p->download_buf_size - read) % p->download_buf_size;
     if (avail == 0) return;
 
     size_t to_copy = avail < free_space ? avail : free_space;
@@ -155,52 +244,125 @@ static void ring_to_stage(StreamPlayer *p) {
         memcpy(p->stage + *stage_len + first, p->mp3_buffer, to_copy - first);
     }
 
-    p->mp3_read_pos = (read + to_copy) % p->download_buf_size;
     *stage_len += to_copy;
+    memory_barrier();
+    p->mp3_read_pos = (read + to_copy) % p->download_buf_size;
+    memory_barrier();
 }
 
-/* Write callback for curl download.
- * Throttles instead of dropping: if the ring is full it waits (bounded),
- * and only skips a byte as a last resort. Never abandons a whole chunk. */
+static bool write_ring_bytes(StreamPlayer *p, const uint8_t *data, size_t total,
+                             u32 epoch) {
+    size_t offset = 0;
+    while (offset < total) {
+        size_t free_bytes = ring_free(p);
+        if (free_bytes == 0) {
+            if (!p->download_active || epoch != p->stream_epoch) return false;
+            svcSleepThread(20000);
+            continue;
+        }
+
+        size_t write = p->mp3_write_pos;
+        size_t contiguous = p->download_buf_size - write;
+        size_t chunk = total - offset;
+        if (chunk > free_bytes) chunk = free_bytes;
+        if (chunk > contiguous) chunk = contiguous;
+
+        memcpy(p->mp3_buffer + write, data + offset, chunk);
+        memory_barrier();
+        p->mp3_write_pos = (write + chunk) % p->download_buf_size;
+        memory_barrier();
+        offset += chunk;
+    }
+    return true;
+}
+
+/* Write callback for curl download.  It strips ICY metadata blocks before
+ * the bytes reach the codec, while never discarding audio bytes. */
 static size_t download_write_cb(void *contents, size_t size, size_t nmemb, void *userp) {
     struct DownloadCtx *ctx = (struct DownloadCtx *)userp;
     StreamPlayer *p = ctx->player;
-
-    /* Stop signal, or a stale thread from a previous stream */
-    if (!p->download_active || ctx->epoch != p->stream_epoch)
-        return 0; /* abort curl */
-
     size_t total = size * nmemb;
+    size_t offset = 0;
     uint8_t *data = (uint8_t *)contents;
 
-    for (size_t i = 0; i < total; i++) {
-        int spins = 0;
-        while ((p->mp3_write_pos + 1) % p->download_buf_size == p->mp3_read_pos) {
-            if (!p->download_active) return 0;
-            if (++spins > 250) break;       /* ~5 ms cap */
-            svcSleepThread(20000);          /* 20 us */
+    if (!p->download_active || ctx->epoch != p->stream_epoch)
+        return 0;
+
+    while (offset < total) {
+        if (p->icy_metaint == 0) {
+            if (!write_ring_bytes(p, data + offset, total - offset, ctx->epoch)) return 0;
+            break;
         }
-        if ((p->mp3_write_pos + 1) % p->download_buf_size == p->mp3_read_pos) {
-            /* Still full after waiting — skip a single byte; the decoder
-             * will resync on the next frame header. Rare in practice. */
+
+        if (p->icy_audio_remaining > 0) {
+            size_t chunk = total - offset;
+            if (chunk > p->icy_audio_remaining) chunk = p->icy_audio_remaining;
+            if (!write_ring_bytes(p, data + offset, chunk, ctx->epoch)) return 0;
+            offset += chunk;
+            p->icy_audio_remaining -= chunk;
             continue;
         }
-        p->mp3_buffer[p->mp3_write_pos] = data[i];
-        p->mp3_write_pos = (p->mp3_write_pos + 1) % p->download_buf_size;
+
+        if (p->icy_metadata_remaining == 0) {
+            p->icy_metadata_remaining = (size_t)data[offset++] * 16U;
+            if (p->icy_metadata_remaining == 0)
+                p->icy_audio_remaining = p->icy_metaint;
+            continue;
+        }
+
+        size_t skip = total - offset;
+        if (skip > p->icy_metadata_remaining) skip = p->icy_metadata_remaining;
+        offset += skip;
+        p->icy_metadata_remaining -= skip;
+        if (p->icy_metadata_remaining == 0) {
+            p->icy_audio_remaining = p->icy_metaint;
+        }
     }
     return total;
+}
+
+static bool retryable_curl_error(CURLcode res) {
+    return res == CURLE_OPERATION_TIMEDOUT ||
+           res == CURLE_COULDNT_CONNECT ||
+           res == CURLE_COULDNT_RESOLVE_HOST ||
+           res == CURLE_RECV_ERROR ||
+           res == CURLE_GOT_NOTHING ||
+           res == CURLE_PARTIAL_FILE;
 }
 
 static void download_thread_func(void *arg) {
     struct DownloadThreadArg *ta = (struct DownloadThreadArg *)arg;
     StreamPlayer *p = ta->player;
+    CURLcode res = CURLE_OK;
+    int attempt = 0;
 
-    CURLcode res = curl_easy_perform(ta->curl);
+    do {
+        /* Each retry starts a fresh HTTP response. */
+        p->icy_metaint = 0;
+        p->icy_audio_remaining = 0;
+        p->icy_metadata_remaining = 0;
+        res = curl_easy_perform(ta->curl);
+        if (res == CURLE_OK || !p->download_active ||
+            ta->ctx->epoch != p->stream_epoch ||
+            res == CURLE_ABORTED_BY_CALLBACK ||
+            !retryable_curl_error(res) || attempt >= STREAM_MAX_RETRIES) {
+            break;
+        }
+
+        p->retry_count = attempt + 1;
+        p->state = STREAM_STATE_RECONNECTING;
+        p->buffering = true;
+        svcSleepThread((u64)(250 + attempt * 500) * 1000000ULL);
+        attempt++;
+    } while (p->download_active && ta->ctx->epoch == p->stream_epoch);
+
     if (res != CURLE_OK && p->download_active &&
         ta->ctx->epoch == p->stream_epoch) {
-        /* Only report genuine errors, not the abort we trigger on stop() */
         snprintf(p->download_error, sizeof(p->download_error),
                  "Download error: %s", curl_easy_strerror(res));
+        p->playing = false;
+        p->buffering = false;
+        p->state = STREAM_STATE_ERROR;
     }
     /* Only touch shared state if we're still the current stream. A stale
      * thread from a previous stream must never write mp3_eof into a newer
@@ -216,6 +378,7 @@ static void download_thread_func(void *arg) {
      * uses the captured pointers, never p->curl — a stale thread from a
      * previous stream must not free a newer stream's handle. */
     curl_easy_cleanup(ta->curl);
+    if (ta->headers) curl_slist_free_all(ta->headers);
     free(ta->ctx);
     free(ta);
 }
@@ -265,17 +428,128 @@ static void submit_wave_buffer(ndspWaveBuf *buf, int16_t *pcm_data,
     ndspChnWaveBufAdd(0, buf);
 }
 
+static void decode_pass_ogg(StreamPlayer *p) {
+    size_t *stage_len = &p->stage_len;
+    size_t *stage_off = &p->stage_off;
+
+    /* Do not start Vorbis on a tiny first packet.  This mirrors the MP3
+     * prebuffer gate and prevents an initial Wi-Fi hiccup from becoming a
+     * DSP underrun. */
+    if (p->state == STREAM_STATE_BUFFERING &&
+        ring_available(p) + (*stage_len - *stage_off) < p->prebuffer_bytes &&
+        !p->mp3_eof) {
+        p->buffering = true;
+        return;
+    }
+
+    ring_to_stage(p);
+
+    for (int i = 0; i < p->num_wave_bufs; i++) {
+        ndspWaveBuf *buf = &p->wave_bufs[i];
+        if (buf->status != NDSP_WBUF_DONE && buf->status != NDSP_WBUF_FREE)
+            continue;
+
+        int16_t *out = p->pcm_data[i];
+        int total_samples = 0;
+        int max_samples = p->pcm_buf_samples * 2;
+        while (total_samples < max_samples) {
+            if (*stage_len - *stage_off < 4096)
+                ring_to_stage(p);
+            if (*stage_len - *stage_off == 0) break;
+
+            size_t used = 0;
+            int samples = ogg_decoder_decode(
+                &p->oggd, p->stage + *stage_off,
+                *stage_len - *stage_off, &used,
+                out + total_samples, max_samples - total_samples);
+            *stage_off += used;
+            total_samples += samples;
+
+            if (samples > 0) {
+                p->active_channels = p->oggd.channels;
+                p->sample_rate = p->oggd.sample_rate;
+                if (!p->decoder_initialized) {
+                    p->decoder_initialized = true;
+                    configure_ndsp_channel(p);
+                }
+            } else if (used == 0) {
+                break;
+            }
+        }
+
+        if (total_samples > 0) {
+            p->decoder_no_progress = 0;
+            submit_wave_buffer(buf, out, total_samples, p->active_channels);
+            p->buffering = false;
+            if (p->state == STREAM_STATE_BUFFERING ||
+                p->state == STREAM_STATE_RECONNECTING)
+                p->state = STREAM_STATE_PLAYING;
+        } else if (p->mp3_eof && ring_available(p) == 0 &&
+                   *stage_len - *stage_off == 0) {
+            p->playing = false;
+            if (p->state != STREAM_STATE_ERROR)
+                p->state = STREAM_STATE_ENDED;
+        } else {
+            if (*stage_len - *stage_off > 16384 && ++p->decoder_no_progress > 120) {
+                set_player_error(p, "Unsupported or invalid OGG stream");
+                return;
+            }
+            p->buffering = true;
+            if (p->state != STREAM_STATE_ERROR &&
+                p->state != STREAM_STATE_RECONNECTING)
+                p->state = STREAM_STATE_BUFFERING;
+        }
+    }
+}
+
 /* ======================================================================
  * One decode pass: refill every finished wave buffer from the MP3 staging
  * buffer. Runs on the decode thread, independent of the render loop.
  * ====================================================================== */
 
 static void decode_pass(StreamPlayer *p) {
+    if (p->codec == STREAM_CODEC_OGG) {
+        decode_pass_ogg(p);
+        return;
+    }
     size_t *stage_len = &p->stage_len;
     size_t *stage_off = &p->stage_off;
 
+    /* Do not start the DSP on the first few kilobytes.  A short network
+     * scheduling hiccup immediately after connect should become a visible
+     * buffering state, not a burst of underrun noise. */
+    if (p->state == STREAM_STATE_BUFFERING &&
+        ring_available(p) < p->prebuffer_bytes && !p->mp3_eof) {
+        p->buffering = true;
+        return;
+    }
+
     /* Compact + top up the staging buffer from the ring */
     ring_to_stage(p);
+
+    /* Some directory entries report a generic codec or a stale MP3 label.
+     * Recognize an Ogg page before handing bytes to minimp3 so the stream
+     * does not enter a misleading silent state. */
+    if (p->codec == STREAM_CODEC_MP3 &&
+        *stage_len - *stage_off >= 4 &&
+        memcmp(p->stage + *stage_off, "OggS", 4) == 0) {
+        p->codec = STREAM_CODEC_OGG;
+        ogg_decoder_close(&p->oggd);
+        ogg_decoder_init(&p->oggd);
+        p->decoder_initialized = false;
+        decode_pass_ogg(p);
+        return;
+    }
+
+    /* ADTS AAC has a distinctive sync/header pattern.  Fail early with a
+     * useful diagnostic when the station metadata was incomplete. */
+    if (p->codec == STREAM_CODEC_MP3 &&
+        *stage_len - *stage_off >= 2 &&
+        p->stage[*stage_off] == 0xff &&
+        (p->stage[*stage_off + 1] & 0xf6) == 0xf0) {
+        set_player_error(p, "AAC stream is not enabled in this build");
+        return;
+    }
 
     /* Refill every wave buffer that has finished playing */
     for (int i = 0; i < p->num_wave_bufs; i++) {
@@ -293,8 +567,12 @@ static void decode_pass(StreamPlayer *p) {
                 ring_to_stage(p);
 
             if (*stage_len - *stage_off == 0) {
-                if (total_samples == 0)
+                if (total_samples == 0) {
                     p->buffering = true;
+                    if (p->state != STREAM_STATE_ERROR &&
+                        p->state != STREAM_STATE_RECONNECTING)
+                        p->state = STREAM_STATE_BUFFERING;
+                }
                 break;
             }
 
@@ -337,6 +615,10 @@ static void decode_pass(StreamPlayer *p) {
         }
 
         if (total_samples == 0) {
+            if (*stage_len - *stage_off > 16384 && ++p->decoder_no_progress > 120) {
+                set_player_error(p, "Unsupported or invalid MP3 stream");
+                return;
+            }
             if (p->mp3_eof && p->mp3_read_pos == p->mp3_write_pos &&
                 *stage_len - *stage_off == 0) {
                 bool any_playing = false;
@@ -350,6 +632,8 @@ static void decode_pass(StreamPlayer *p) {
                 }
                 if (!any_playing) {
                     p->playing = false;
+                    if (p->state != STREAM_STATE_ERROR)
+                        p->state = STREAM_STATE_ENDED;
                     return;
                 }
             }
@@ -357,7 +641,11 @@ static void decode_pass(StreamPlayer *p) {
         }
 
         submit_wave_buffer(buf, out, total_samples, p->active_channels);
+        p->decoder_no_progress = 0;
         p->buffering = false;
+        if (p->state == STREAM_STATE_BUFFERING ||
+            p->state == STREAM_STATE_RECONNECTING)
+            p->state = STREAM_STATE_PLAYING;
     }
 }
 
@@ -367,9 +655,12 @@ static void decode_thread_func(void *arg) {
     StreamPlayer *p = (StreamPlayer *)arg;
     while (p->playing) {
         if (p->paused) {
+            p->state = STREAM_STATE_PAUSED;
             svcSleepThread(20 * 1000 * 1000); /* 20 ms */
             continue;
         }
+        if (p->state == STREAM_STATE_PAUSED)
+            p->state = p->buffering ? STREAM_STATE_BUFFERING : STREAM_STATE_PLAYING;
         decode_pass(p);
         svcSleepThread(4 * 1000 * 1000); /* 4 ms */
     }
@@ -390,6 +681,7 @@ StreamPlayer *stream_player_create_with_bufsize(StreamBufSize bufsize) {
     p->num_wave_bufs = buf_configs[bufsize].num_wave_bufs;
     p->pcm_buf_samples = buf_configs[bufsize].pcm_buf_samples;
     p->download_buf_size = buf_configs[bufsize].download_buf_size;
+    p->prebuffer_bytes = buf_configs[bufsize].prebuffer_bytes;
 
     /* Allocate MP3 download ring buffer */
     p->mp3_buffer = malloc(p->download_buf_size);
@@ -427,10 +719,14 @@ StreamPlayer *stream_player_create_with_bufsize(StreamBufSize bufsize) {
 
     /* Initialize MP3 decoder */
     mp3dec_init(&p->mp3d);
+    ogg_decoder_init(&p->oggd);
 
     p->volume = 0.8f;
     p->active_channels = 2;
     p->sample_rate = 44100;
+    p->codec = STREAM_CODEC_UNKNOWN;
+    p->state = STREAM_STATE_IDLE;
+    ndspSetMasterVol(p->volume);
     return p;
 }
 
@@ -439,7 +735,23 @@ StreamPlayer *stream_player_create(void) {
 }
 
 int stream_player_play(StreamPlayer *p, const char *url) {
-    if (!p || !url) return -1;
+    return stream_player_play_with_codec(p, url, NULL);
+}
+
+int stream_player_play_with_codec(StreamPlayer *p, const char *url,
+                                  const char *codec_name) {
+    StreamCodec codec;
+    if (!p || !url || !url[0]) return -1;
+
+    codec = codec_from_string(codec_name);
+    if ((!codec_name || !codec_name[0]) &&
+        (strstr(url, ".ogg") || strstr(url, ".oga")))
+        codec = STREAM_CODEC_OGG;
+    if (codec != STREAM_CODEC_MP3 && codec != STREAM_CODEC_OGG) {
+        set_player_error(p, "Unsupported stream codec (MP3 or OGG required)");
+        p->codec = codec;
+        return -2;
+    }
 
     /* Stop any current playback and its threads */
     if (p->playing || p->decode_thread || p->download_thread)
@@ -452,7 +764,7 @@ int stream_player_play(StreamPlayer *p, const char *url) {
      * in practice. If it somehow still runs, refuse to start. */
     if (p->download_thread) {
         p->download_active = false;
-        if (threadJoin(p->download_thread, 15000000) == 0) {
+        if (threadJoin(p->download_thread, 1000000) == 0) {
             threadFree(p->download_thread);
             p->download_thread = NULL;
         }
@@ -470,6 +782,12 @@ int stream_player_play(StreamPlayer *p, const char *url) {
     /* New epoch so any stale download thread can't write into this stream */
     p->stream_epoch++;
 
+    strncpy(p->last_url, url, sizeof(p->last_url) - 1);
+    p->last_url[sizeof(p->last_url) - 1] = '\0';
+    p->codec = codec;
+    p->state = STREAM_STATE_CONNECTING;
+    p->retry_count = 0;
+
     /* Reset state */
     p->mp3_write_pos = 0;
     p->mp3_read_pos = 0;
@@ -477,14 +795,19 @@ int stream_player_play(StreamPlayer *p, const char *url) {
     p->download_active = false;
     p->download_done = false;
     p->decoder_initialized = false;
+    p->decoder_no_progress = 0;
     p->active_channels = 2; /* Assume stereo until first frame decoded */
     p->sample_rate = 44100;
     p->download_error[0] = '\0';
+    p->icy_metaint = 0;
+    p->icy_audio_remaining = 0;
+    p->icy_metadata_remaining = 0;
 
     /* Reset the MP3 decoder state between streams.
      * Without this, the synthesis filterbank carries stale
      * state from the previous stream, causing audio artifacts. */
     mp3dec_init(&p->mp3d);
+    ogg_decoder_close(&p->oggd);
 
     /* Reset the decode staging buffer for the new stream */
     p->stage_len = 0;
@@ -503,14 +826,27 @@ int stream_player_play(StreamPlayer *p, const char *url) {
 
     /* Start HTTP download */
     CURL *curl = curl_easy_init();
-    if (!curl) return -1;
+    if (!curl) {
+        set_player_error(p, "Failed to initialize network stream");
+        return -1;
+    }
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "3DSRadio/1.0");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "3DSRadio/1.1");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    FILE *ca = fopen("romfs:/cacert.pem", "rb");
+    if (ca) {
+        fclose(ca);
+        curl_easy_setopt(curl, CURLOPT_CAINFO, "romfs:/cacert.pem");
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    } else {
+        /* Keep legacy stations playable when the optional CA bundle was not
+         * packaged, while still verifying every normal CI/release build. */
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L); /* No timeout for streaming */
     /* Abort if the stream stalls (guarantees the download thread always
@@ -521,6 +857,7 @@ int stream_player_play(StreamPlayer *p, const char *url) {
     struct DownloadCtx *ctx = malloc(sizeof(struct DownloadCtx));
     if (!ctx) {
         curl_easy_cleanup(curl);
+        set_player_error(p, "Not enough memory for stream");
         return -1;
     }
     ctx->player = p;
@@ -528,20 +865,28 @@ int stream_player_play(StreamPlayer *p, const char *url) {
 
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, download_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, ctx);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, stream_header_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, ctx);
+    struct curl_slist *headers = curl_slist_append(NULL, "Icy-MetaData: 1");
+    if (headers) curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
     struct DownloadThreadArg *ta = malloc(sizeof(struct DownloadThreadArg));
     if (!ta) {
         curl_easy_cleanup(curl);
+        if (headers) curl_slist_free_all(headers);
         free(ctx);
+        set_player_error(p, "Not enough memory for stream thread");
         return -1;
     }
     ta->player = p;
     ta->curl = curl;
+    ta->headers = headers;
     ta->ctx = ctx;
 
     p->download_active = true;
     p->playing = true;
     p->buffering = true;
+    p->state = STREAM_STATE_BUFFERING;
 
     s32 prio = 0x30;
     svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
@@ -552,9 +897,13 @@ int stream_player_play(StreamPlayer *p, const char *url) {
                                       32 * 1024, prio + 1, -2, true);
     if (!p->download_thread) {
         curl_easy_cleanup(ta->curl);
+        if (ta->headers) curl_slist_free_all(ta->headers);
         free(ta->ctx);
         free(ta);
         p->playing = false;
+        p->state = STREAM_STATE_ERROR;
+        snprintf(p->download_error, sizeof(p->download_error),
+                 "%s", "Failed to create download thread");
         return -1;
     }
 
@@ -572,6 +921,7 @@ int stream_player_play(StreamPlayer *p, const char *url) {
             threadFree(p->download_thread);
             p->download_thread = NULL;
         }
+        set_player_error(p, "Failed to create audio thread");
         return -1;
     }
 
@@ -584,9 +934,12 @@ void stream_player_update(StreamPlayer *p) {
 }
 
 void stream_player_toggle_pause(StreamPlayer *p) {
-    if (!p) return;
+    if (!p || !p->playing || p->state == STREAM_STATE_ERROR ||
+        p->state == STREAM_STATE_ENDED) return;
     p->paused = !p->paused;
     ndspChnSetPaused(0, p->paused);
+    p->state = p->paused ? STREAM_STATE_PAUSED :
+        (p->buffering ? STREAM_STATE_BUFFERING : STREAM_STATE_PLAYING);
 }
 
 void stream_player_stop(StreamPlayer *p) {
@@ -624,6 +977,7 @@ void stream_player_stop(StreamPlayer *p) {
     memset(&p->wave_bufs, 0, sizeof(p->wave_bufs));
 
     p->buffering = false;
+    p->state = STREAM_STATE_IDLE;
 }
 
 void stream_player_destroy(StreamPlayer *p) {
@@ -653,6 +1007,7 @@ void stream_player_destroy(StreamPlayer *p) {
         return;
     }
 
+    ogg_decoder_close(&p->oggd);
     ndspExit();
 
     for (int i = 0; i < p->num_wave_bufs; i++) {
@@ -663,19 +1018,21 @@ void stream_player_destroy(StreamPlayer *p) {
 }
 
 bool stream_player_is_playing(StreamPlayer *p) {
-    return p && p->playing && !p->paused;
+    return p && p->state == STREAM_STATE_PLAYING;
 }
 
 bool stream_player_is_paused(StreamPlayer *p) {
-    return p && p->paused;
+    return p && p->state == STREAM_STATE_PAUSED;
 }
 
 bool stream_player_is_buffering(StreamPlayer *p) {
-    return p && p->buffering;
+    return p && (p->state == STREAM_STATE_BUFFERING ||
+                 p->state == STREAM_STATE_RECONNECTING);
 }
 
 bool stream_player_is_finished(StreamPlayer *p) {
-    return p && !p->playing && !p->download_active;
+    return p && (p->state == STREAM_STATE_ENDED ||
+                 p->state == STREAM_STATE_ERROR);
 }
 
 void stream_player_set_volume(StreamPlayer *p, float vol) {
@@ -692,5 +1049,43 @@ float stream_player_get_volume(StreamPlayer *p) {
 }
 
 const char *stream_player_error(StreamPlayer *p) {
+    memory_barrier();
     return p ? p->download_error : NULL;
+}
+
+int stream_player_retry(StreamPlayer *p) {
+    if (!p || !p->last_url[0]) return -1;
+    return stream_player_play_with_codec(p, p->last_url,
+                                         p->codec == STREAM_CODEC_MP3 ? "MP3" :
+                                         p->codec == STREAM_CODEC_OGG ? "OGG" :
+                                         p->codec == STREAM_CODEC_AAC ? "AAC" : NULL);
+}
+
+StreamPlayerState stream_player_get_state(StreamPlayer *p) {
+    memory_barrier();
+    return p ? p->state : STREAM_STATE_ERROR;
+}
+
+StreamCodec stream_player_get_codec(StreamPlayer *p) {
+    return p ? p->codec : STREAM_CODEC_UNKNOWN;
+}
+
+int stream_player_get_sample_rate(StreamPlayer *p) {
+    return p ? p->sample_rate : 0;
+}
+
+int stream_player_get_channels(StreamPlayer *p) {
+    return p ? p->active_channels : 0;
+}
+
+int stream_player_get_buffer_percent(StreamPlayer *p) {
+    if (!p || p->download_buf_size < 2) return 0;
+    size_t available = ring_available(p);
+    size_t percent = available * 100 / (p->download_buf_size - 1);
+    return percent > 100 ? 100 : (int)percent;
+}
+
+bool stream_player_codec_supported(const char *codec) {
+    StreamCodec type = codec_from_string(codec);
+    return type == STREAM_CODEC_MP3 || type == STREAM_CODEC_OGG;
 }

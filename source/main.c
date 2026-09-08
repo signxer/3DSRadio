@@ -13,6 +13,8 @@
 #include "locale.h"
 #include "stream_player.h"
 #include "ui_skin.h"
+#include "settings.h"
+#include "search_input.h"
 
 /* ======================================================================
  * 3DSRadio - Apple-Light UI Design
@@ -45,30 +47,49 @@
  * C2D_Color32(r,g,b,a) guarantees correct PICA200 RGBA8 byte order.
  * ====================================================================== */
 
-/* Background layers — light, paper-like */
-#define CLR_BG_TOP      C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF)  /* systemGray6 */
-#define CLR_BG_BOT      C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF)  /* White */
-#define CLR_SURFACE     C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF)  /* White card */
-#define CLR_SURFACE_LT  C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF)  /* Light gray hover */
+/* Theme tokens.  They remain variables rather than preprocessor constants so
+ * the user can switch the bundled light/dark skins without restarting. */
+static u32 CLR_BG_TOP     = C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF);
+static u32 CLR_BG_BOT     = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+static u32 CLR_SURFACE    = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+static u32 CLR_SURFACE_LT = C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF);
+static u32 CLR_TEXT       = C2D_Color32(0x1C, 0x1C, 0x1E, 0xFF);
+static u32 CLR_TEXT_SEC   = C2D_Color32(0x48, 0x48, 0x4A, 0xFF);
+static u32 CLR_TEXT_DIM   = C2D_Color32(0x8E, 0x8E, 0x93, 0xFF);
+static u32 CLR_ACCENT     = C2D_Color32(0x00, 0x7A, 0xFF, 0xFF);
+static u32 CLR_ACCENT2    = C2D_Color32(0xAF, 0x52, 0xDE, 0xFF);
+static u32 CLR_ACCENT3    = C2D_Color32(0xFF, 0x3B, 0x30, 0xFF);
+static u32 CLR_OK         = C2D_Color32(0x34, 0xC7, 0x59, 0xFF);
+static u32 CLR_ERR        = C2D_Color32(0xFF, 0x3B, 0x30, 0xFF);
+static u32 CLR_WARN       = C2D_Color32(0xFF, 0x95, 0x00, 0xFF);
+static u32 CLR_INFO       = C2D_Color32(0x00, 0x7A, 0xFF, 0xFF);
+static u32 CLR_STATUSBAR  = C2D_Color32(0xE5, 0xE5, 0xEA, 0xFF);
 
-/* Text — dark for high contrast on light */
-#define CLR_TEXT        C2D_Color32(0x1C, 0x1C, 0x1E, 0xFF)  /* systemLabel */
-#define CLR_TEXT_SEC    C2D_Color32(0x48, 0x48, 0x4A, 0xFF)  /* secondaryLabel */
-#define CLR_TEXT_DIM    C2D_Color32(0x8E, 0x8E, 0x93, 0xFF)  /* systemGray */
-
-/* Accent — single semantic accent (systemBlue) */
-#define CLR_ACCENT      C2D_Color32(0x00, 0x7A, 0xFF, 0xFF)  /* Blue accent */
-#define CLR_ACCENT2     C2D_Color32(0xAF, 0x52, 0xDE, 0xFF)  /* Purple (volume+) */
-#define CLR_ACCENT3     C2D_Color32(0xFF, 0x3B, 0x30, 0xFF)  /* Red (stop/back) */
-
-/* Status — semantic iOS system colors */
-#define CLR_OK          C2D_Color32(0x34, 0xC7, 0x59, 0xFF)  /* systemGreen */
-#define CLR_ERR         C2D_Color32(0xFF, 0x3B, 0x30, 0xFF)  /* systemRed */
-#define CLR_WARN        C2D_Color32(0xFF, 0x95, 0x00, 0xFF)  /* systemOrange */
-#define CLR_INFO        C2D_Color32(0x00, 0x7A, 0xFF, 0xFF)  /* systemBlue */
-
-/* Status bar — subtle light gray distinction */
-#define CLR_STATUSBAR   C2D_Color32(0xE5, 0xE5, 0xEA, 0xFF)  /* systemGray4 */
+static void apply_theme_palette(UiTheme theme) {
+    if (theme == UI_THEME_DARK) {
+        CLR_BG_TOP = C2D_Color32(0x1B, 0x1C, 0x20, 0xFF);
+        CLR_BG_BOT = C2D_Color32(0x10, 0x11, 0x14, 0xFF);
+        CLR_SURFACE = C2D_Color32(0x25, 0x26, 0x2B, 0xFF);
+        CLR_SURFACE_LT = C2D_Color32(0x34, 0x36, 0x40, 0xFF);
+        CLR_TEXT = C2D_Color32(0xF5, 0xF5, 0xF7, 0xFF);
+        CLR_TEXT_SEC = C2D_Color32(0xC7, 0xC7, 0xCC, 0xFF);
+        CLR_TEXT_DIM = C2D_Color32(0x8E, 0x8E, 0x93, 0xFF);
+        CLR_ACCENT = C2D_Color32(0x64, 0xB5, 0xFF, 0xFF);
+        CLR_ACCENT2 = C2D_Color32(0xD0, 0x8C, 0xFF, 0xFF);
+        CLR_STATUSBAR = C2D_Color32(0x2C, 0x2D, 0x33, 0xFF);
+    } else {
+        CLR_BG_TOP = C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF);
+        CLR_BG_BOT = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+        CLR_SURFACE = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
+        CLR_SURFACE_LT = C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF);
+        CLR_TEXT = C2D_Color32(0x1C, 0x1C, 0x1E, 0xFF);
+        CLR_TEXT_SEC = C2D_Color32(0x48, 0x48, 0x4A, 0xFF);
+        CLR_TEXT_DIM = C2D_Color32(0x8E, 0x8E, 0x93, 0xFF);
+        CLR_ACCENT = C2D_Color32(0x00, 0x7A, 0xFF, 0xFF);
+        CLR_ACCENT2 = C2D_Color32(0xAF, 0x52, 0xDE, 0xFF);
+        CLR_STATUSBAR = C2D_Color32(0xE5, 0xE5, 0xEA, 0xFF);
+    }
+}
 
 /* ======================================================================
  * Async Loading System
@@ -88,7 +109,7 @@ typedef enum {
 /* Upper bound on how long the main loop waits for a worker thread to exit
  * before giving up and detaching it. Prevents a stuck network call (e.g.
  * after a long stream session) from freezing the whole UI forever. */
-#define ASYNC_JOIN_TIMEOUT_NS 5000000000LL  /* 5 seconds */
+#define ASYNC_JOIN_TIMEOUT_NS 1000000LL  /* 1 ms; retry on the next frame */
 
 typedef enum {
     ASYNC_REQ_LOAD_TAGS,
@@ -132,6 +153,7 @@ typedef enum {
     SCREEN_STATION_LIST,
     SCREEN_PLAYING,
     SCREEN_SEARCH,
+    SCREEN_SETTINGS,
     SCREEN_STATION_INFO,
 } AppScreen;
 
@@ -148,15 +170,20 @@ typedef struct {
     /* Tag data */
     RadioTag tags[MAX_TAGS];
     int tag_count;
+    bool tags_loaded;
 
     /* Language data */
     RadioLanguage languages[MAX_TAGS];
     int language_count;
+    bool languages_loaded;
 
     /* Station data */
     RadioStation stations[MAX_STATIONS];
     int station_count;
     int station_list_parent;  /* enum AppScreen; where B goes back to */
+    RadioStation top_stations[MAX_STATIONS];
+    int top_count;
+    bool top_loaded;
 
     /* Playing state */
     RadioStation *current_station;
@@ -170,6 +197,14 @@ typedef struct {
     /* Search */
     char search_query[64];
     int search_cursor;
+    SearchInput search_input;
+    int search_candidate_cursor;
+    int search_candidate_page;
+    bool search_candidate_focus;
+    bool search_symbols;
+
+    /* Runtime preferences */
+    AppSettings settings;
 
     /* Async loading */
     AsyncLoad async;
@@ -191,6 +226,15 @@ static C3D_RenderTarget *bottom = NULL;
 
 /* Skin */
 static UiSkin skin;
+
+static bool load_theme(UiTheme theme) {
+    const char *path = theme == UI_THEME_DARK
+        ? "romfs:/ui-skin-dark.png" : "romfs:/ui-skin-light.png";
+    ui_skin_clear(&skin);
+    ui_skin_init(&skin);
+    apply_theme_palette(theme);
+    return ui_skin_load(&skin, path);
+}
 
 /* ======================================================================
  * Drawing Primitives - Skin-based Apple-Light Style
@@ -287,6 +331,9 @@ static void draw_selection(float x, float y, float w, float h) {
     if (!ok) {
         C2D_DrawRectSolid(x, y, 0.5f, w, h, CLR_SURFACE_LT);
     }
+    /* ClouDS-style active rail: it makes focus readable even when the skin
+     * texture is dimmed by the dark theme or by a small 3DS screen. */
+    C2D_DrawRectSolid(x, y + 4.0f, 0.5f, 3.0f, h - 8.0f, CLR_ACCENT);
 }
 
 /* Draw a header/title bar */
@@ -336,6 +383,84 @@ static void draw_label(float x, float y, float size, u32 color,
     C2D_DrawText(&c2d_text, C2D_WithColor, x, y, 0.5f, size, size, color);
 }
 
+static const char *stream_codec_name(StreamCodec codec) {
+    switch (codec) {
+        case STREAM_CODEC_MP3: return "MP3";
+        case STREAM_CODEC_OGG: return "OGG/Vorbis";
+        case STREAM_CODEC_AAC: return "AAC";
+        default: return "?";
+    }
+}
+
+static size_t utf8_codepoint_width(unsigned char first) {
+    /* CJK glyphs are roughly two Latin columns at the bundled font size. */
+    return first < 0x80 ? 1 : 2;
+}
+
+static size_t utf8_display_columns(const char *text) {
+    size_t columns = 0;
+    size_t length;
+    if (!text) return 0;
+    length = strlen(text);
+    for (size_t i = 0; i < length; ) {
+        unsigned char c = (unsigned char)text[i];
+        size_t codepoint = (c < 0x80) ? 1 :
+                           ((c & 0xE0) == 0xC0) ? 2 :
+                           ((c & 0xF0) == 0xE0) ? 3 : 4;
+        if (i + codepoint > length) break;
+        i += codepoint;
+        columns += utf8_codepoint_width(c);
+    }
+    return columns;
+}
+
+static void copy_utf8_ellipsis(char *dst, size_t dst_size,
+                               const char *src, size_t max_columns) {
+    size_t used = 0;
+    size_t columns = 0;
+    size_t len;
+    if (!dst || dst_size == 0) return;
+    dst[0] = '\0';
+    if (!src) return;
+    len = strlen(src);
+
+    /* Preserve the complete string when it fits both the byte buffer and the
+     * approximate pixel-width budget. */
+    if (len < dst_size) {
+        size_t scan = 0;
+        size_t scan_columns = 0;
+        while (scan < len) {
+            unsigned char c = (unsigned char)src[scan];
+            size_t codepoint = (c < 0x80) ? 1 :
+                               ((c & 0xE0) == 0xC0) ? 2 :
+                               ((c & 0xF0) == 0xE0) ? 3 : 4;
+            if (scan + codepoint > len) break;
+            scan += codepoint;
+            scan_columns += utf8_codepoint_width(c);
+        }
+        if (scan == len && scan_columns <= max_columns) {
+            memcpy(dst, src, len + 1);
+            return;
+        }
+    }
+
+    if (max_columns <= 3) max_columns = 4;
+    max_columns -= 3;
+    while (used < len && columns < max_columns) {
+        unsigned char c = (unsigned char)src[used];
+        size_t codepoint = (c < 0x80) ? 1 :
+                           ((c & 0xE0) == 0xC0) ? 2 :
+                           ((c & 0xF0) == 0xE0) ? 3 : 4;
+        size_t width = utf8_codepoint_width(c);
+        if (used + codepoint > len || columns + width > max_columns) break;
+        used += codepoint;
+        columns += width;
+    }
+    if (used + 3 >= dst_size) used = dst_size - 4;
+    memcpy(dst, src, used);
+    memcpy(dst + used, "...", 4);
+}
+
 /* Status bar at bottom of top screen */
 static void draw_status_bar(void) {
     select_top();
@@ -359,10 +484,11 @@ static void draw_status_bar(void) {
         u32 c = app.status_color;
         u8 a = (u8)((c & 0xFF) * alpha);
         c = (c & 0xFFFFFF00) | a;
-        /* Rough centering: CJK glyphs are ~14px at 0.5f, latin narrower */
-        float tw = (float)strlen(app.status_text) * 7.0f;
+        char status[80];
+        copy_utf8_ellipsis(status, sizeof(status), app.status_text, 28);
+        float tw = (float)utf8_display_columns(status) * 7.0f;
         draw_label((TOP_WIDTH - tw) / 2.0f, TOP_HEIGHT - 21, 0.5f, c,
-                   "%s", app.status_text);
+                   "%s", status);
     } else {
         const char *buf_names[] = {tr_buffer_small(), tr_buffer_medium(), tr_buffer_large()};
         draw_label(TOP_WIDTH/2 - 40, TOP_HEIGHT - 21, 0.5f, CLR_TEXT_DIM,
@@ -377,6 +503,7 @@ static void draw_status_bar(void) {
 /* Top screen hero header */
 static void draw_hero_header(const char *title, const char *subtitle) {
     select_top();
+    clear_top();
     draw_gradient(0, 0, TOP_WIDTH, 60, 0xFFFFFFFF, 0x00000000);
 
     draw_label(20, 10, 0.9f, CLR_TEXT, "%s", title);
@@ -413,7 +540,7 @@ static void render_main_menu(void) {
 
     const char *items[] = {
         tr_menu_browse_genre(), tr_menu_browse_language(),
-        tr_menu_top_stations(), tr_menu_search(), tr_menu_about()
+        tr_menu_top_stations(), tr_menu_search(), tr_menu_settings()
     };
     for (int i = 0; i < MAIN_MENU_COUNT; i++) {
         int y = 28 + i * 36;
@@ -436,6 +563,12 @@ static void render_main_menu(void) {
  * Screen: Tag List
  * ====================================================================== */
 
+static void draw_empty_list_state(void) {
+    draw_panel(12, 68, BOT_WIDTH - 24, 58);
+    draw_label(24, 82, 0.52f, CLR_WARN, "%s", tr_no_stations());
+    draw_label(24, 105, 0.38f, CLR_TEXT_DIM, "%s", tr_back());
+}
+
 static void render_tag_list(void) {
     draw_hero_header(tr_genre_header(), tr_genre_subtitle());
 
@@ -443,6 +576,12 @@ static void render_tag_list(void) {
     clear_bottom();
 
     draw_label(15, 8, 0.55f, CLR_TEXT_DIM, "%s", tr_genres_available(app.tag_count));
+
+    if (app.tag_count <= 0) {
+        draw_empty_list_state();
+        draw_status_bar();
+        return;
+    }
 
     int start = app.scroll_offset;
     int end = start + MAX_VISIBLE_ITEMS;
@@ -458,7 +597,7 @@ static void render_tag_list(void) {
         }
 
         char label[128];
-        snprintf(label, sizeof(label), "%s", app.tags[i].name);
+        copy_utf8_ellipsis(label, sizeof(label), app.tags[i].name, 26);
         char count_str[16];
         snprintf(count_str, sizeof(count_str), "%d", app.tags[i].stationcount);
 
@@ -486,6 +625,12 @@ static void render_language_list(void) {
 
     draw_label(15, 8, 0.55f, CLR_TEXT_DIM, "%s", tr_languages_available(app.language_count));
 
+    if (app.language_count <= 0) {
+        draw_empty_list_state();
+        draw_status_bar();
+        return;
+    }
+
     int start = app.scroll_offset;
     int end = start + MAX_VISIBLE_ITEMS;
     if (end > app.language_count) end = app.language_count;
@@ -500,7 +645,7 @@ static void render_language_list(void) {
         }
 
         char label[128];
-        snprintf(label, sizeof(label), "%s", app.languages[i].name);
+        copy_utf8_ellipsis(label, sizeof(label), app.languages[i].name, 26);
         char count_str[16];
         snprintf(count_str, sizeof(count_str), "%d", app.languages[i].stationcount);
 
@@ -526,6 +671,12 @@ static void render_station_list(void) {
     select_bottom();
     clear_bottom();
 
+    if (app.station_count <= 0) {
+        draw_empty_list_state();
+        draw_status_bar();
+        return;
+    }
+
     int start = app.scroll_offset;
     int end = start + MAX_VISIBLE_ITEMS;
     if (end > app.station_count) end = app.station_count;
@@ -542,27 +693,21 @@ static void render_station_list(void) {
         RadioStation *s = &app.stations[i];
 
         /* Station name — keep it clear of the bitrate badge on the right */
-        char name_buf[24];
-        size_t name_len = strlen(s->name);
-        if (name_len > 18) {
-            memcpy(name_buf, s->name, 16);
-            name_buf[16] = '.';
-            name_buf[17] = '.';
-            name_buf[18] = '.';
-            name_buf[19] = '\0';
-        } else {
-            strcpy(name_buf, s->name);
-        }
+        char name_buf[64];
+        copy_utf8_ellipsis(name_buf, sizeof(name_buf), s->name, 24);
         draw_label(12, y + 2, 0.5f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", name_buf);
 
-        /* Bitrate + codec badge using skin dot */
-        if (s->bitrate > 0) {
-            char badge[16];
-            snprintf(badge, sizeof(badge), "%d kbps", s->bitrate);
-            /* Small accent dot before bitrate */
-            ui_skin_draw_tinted(&skin, UI_SKIN_DOT_CYAN,
-                BOT_WIDTH - 72, y + 4, 0.5f, 10, 10, CLR_ACCENT);
-            draw_label(BOT_WIDTH - 60, y + 2, 0.35f, CLR_ACCENT, "%s", badge);
+        /* Codec + bitrate badge.  Unsupported formats remain visible but are
+         * clearly marked so A never leads to a silent playback screen. */
+        if (s->codec[0] || s->bitrate > 0) {
+            char badge[24];
+            const bool supported = stream_player_codec_supported(s->codec);
+            const u32 badge_color = supported ? CLR_ACCENT : CLR_WARN;
+            if (s->bitrate > 0)
+                snprintf(badge, sizeof(badge), "%.8s %d", s->codec[0] ? s->codec : "?", s->bitrate);
+            else
+                snprintf(badge, sizeof(badge), "%.8s", s->codec[0] ? s->codec : "?");
+            draw_label(BOT_WIDTH - 82, y + 2, 0.32f, badge_color, "%s", badge);
         }
     }
 
@@ -578,27 +723,59 @@ static void render_station_list(void) {
  * ====================================================================== */
 
 static void render_playing(void) {
+    StreamPlayerState player_state = stream_player_get_state(app.stream_player);
+    const char *state_label = tr_paused();
+    u32 state_color = CLR_WARN;
+    if (player_state == STREAM_STATE_PLAYING) {
+        state_label = tr_now_playing();
+        state_color = CLR_OK;
+    } else if (player_state == STREAM_STATE_BUFFERING) {
+        state_label = tr_buffering();
+        state_color = CLR_WARN;
+    } else if (player_state == STREAM_STATE_RECONNECTING) {
+        state_label = tr_reconnecting();
+        state_color = CLR_INFO;
+    } else if (player_state == STREAM_STATE_ERROR) {
+        state_label = stream_player_error(app.stream_player);
+        if (!state_label || !state_label[0]) state_label = tr_stream_failed();
+        state_color = CLR_ERR;
+    } else if (player_state == STREAM_STATE_CONNECTING) {
+        state_label = tr_connecting_stream();
+        state_color = CLR_INFO;
+    } else if (player_state == STREAM_STATE_ENDED) {
+        state_label = tr_stream_ended();
+        state_color = CLR_WARN;
+    }
+
     select_top();
     clear_top();
 
     if (!app.current_station) return;
 
-    /* Large station name at top */
-    draw_label(20, 30, 1.2f, CLR_TEXT, "%s", app.current_station->name);
+    /* Large station name at top, clipped on UTF-8 boundaries. */
+    char station_title[80];
+    copy_utf8_ellipsis(station_title, sizeof(station_title),
+                       app.current_station->name, 38);
+    draw_label(20, 30, 1.2f, CLR_TEXT, "%s", station_title);
 
     /* Tags as chips using skin button */
     if (strlen(app.current_station->tags) > 0) {
         char first_tag[32] = {0};
         const char *comma = strchr(app.current_station->tags, ',');
         if (comma) {
+            char tag_segment[64];
             size_t len = (size_t)(comma - app.current_station->tags);
-            if (len > 20) len = 20;
-            memcpy(first_tag, app.current_station->tags, len);
+            if (len >= sizeof(tag_segment)) len = sizeof(tag_segment) - 1;
+            memcpy(tag_segment, app.current_station->tags, len);
+            tag_segment[len] = '\0';
+            copy_utf8_ellipsis(first_tag, sizeof(first_tag), tag_segment, 18);
         } else {
-            strncpy(first_tag, app.current_station->tags, 20);
+            copy_utf8_ellipsis(first_tag, sizeof(first_tag),
+                               app.current_station->tags, 18);
         }
         if (strlen(first_tag) > 0) {
-            float tag_w = strlen(first_tag) * 7.0f + 16.0f;
+            float tag_w = (float)utf8_display_columns(first_tag) * 7.0f + 16.0f;
+            if (tag_w > TOP_WIDTH - 40) tag_w = TOP_WIDTH - 40;
             draw_button(20, 66, tag_w, 24, false);
             draw_label(28, 71, 0.45f, CLR_TEXT, "%s", first_tag);
         }
@@ -615,7 +792,9 @@ static void render_playing(void) {
     } else {
         snprintf(info, sizeof(info), "%s", tr_internet_radio());
     }
-    draw_label(20, 96, 0.5f, CLR_TEXT_SEC, "%s", info);
+    char info_clipped[128];
+    copy_utf8_ellipsis(info_clipped, sizeof(info_clipped), info, 54);
+    draw_label(20, 96, 0.5f, CLR_TEXT_SEC, "%s", info_clipped);
 
     /* Votes */
     draw_label(20, 112, 0.4f, CLR_TEXT_DIM, "%s",
@@ -632,7 +811,7 @@ static void render_playing(void) {
     for (int i = 0; i < bar_count; i++) {
         float phase = (float)(i * 3 + app.frame_count * 2);
         float height = 8.0f + sinf(phase * 0.1f) * 15.0f + sinf(phase * 0.05f) * 8.0f;
-        if (!app.is_playing) height = 2.0f;
+        if (player_state != STREAM_STATE_PLAYING) height = 2.0f;
 
         float t = (float)i / bar_count;
         u8 r = (u8)((1-t) * 0x5C + t * 0x7C);
@@ -647,12 +826,10 @@ static void render_playing(void) {
 
     /* Playing/Paused indicator with skin dot */
     ui_skin_draw_tinted(&skin,
-        app.is_playing ? UI_SKIN_DOT_GREEN : UI_SKIN_DOT_ORANGE,
+        player_state == STREAM_STATE_PLAYING ? UI_SKIN_DOT_GREEN : UI_SKIN_DOT_ORANGE,
         20, TOP_HEIGHT - 52, 0.5f, 12, 12,
-        app.is_playing ? CLR_OK : CLR_WARN);
-    draw_label(38, TOP_HEIGHT - 49, 0.55f,
-               app.is_playing ? CLR_OK : CLR_WARN,
-               "%s", app.is_playing ? tr_now_playing() : tr_paused());
+        state_color);
+    draw_label(38, TOP_HEIGHT - 49, 0.55f, state_color, "%s", state_label);
 
     /* Volume */
     draw_label(TOP_WIDTH - 90, TOP_HEIGHT - 49, 0.45f, CLR_TEXT_DIM,
@@ -662,6 +839,13 @@ static void render_playing(void) {
     select_top();
     ui_skin_draw_nine_slice(&skin, UI_SKIN_PROGRESS,
         20, TOP_HEIGHT - 32, 0.5f, TOP_WIDTH - 40, 6, 4U, 2.0f);
+    int buffer_percent = stream_player_get_buffer_percent(app.stream_player);
+    if (buffer_percent > 0) {
+        if (buffer_percent > 100) buffer_percent = 100;
+        C2D_DrawRectSolid(22, TOP_HEIGHT - 31, 0.5f,
+                          (TOP_WIDTH - 44) * buffer_percent / 100.0f,
+                          4.0f, state_color);
+    }
 
     /* Bottom screen: controls */
     select_bottom();
@@ -680,28 +864,35 @@ static void render_playing(void) {
     for (int i = 0; i < 4; i++) {
         int x = 8 + i * 78;
         int y = 45;
-        draw_button(x, y, 72, 55, false);
+        draw_button(x, y, 72, 55,
+                    i == 0 && (player_state == STREAM_STATE_PLAYING ||
+                               player_state == STREAM_STATE_PAUSED));
         draw_label(x + 10, y + 17, 0.6f, controls[i].color, "%s", controls[i].key);
         draw_label(x + 10, y + 38, 0.45f, CLR_TEXT_DIM, "%s", controls[i].label);
     }
 
-    /* Stream info panel */
-    if (strlen(app.stream_url) > 0) {
-        char url_display[48];
-        size_t len = strlen(app.stream_url);
-        if (len > 40) {
-            memcpy(url_display, app.stream_url, 37);
-            url_display[37] = '.';
-            url_display[38] = '.';
-            url_display[39] = '.';
-            url_display[40] = '\0';
-        } else {
-            strcpy(url_display, app.stream_url);
-        }
-        draw_panel(8, 118, BOT_WIDTH - 16, 42);
-        draw_label(15, 126, 0.4f, CLR_TEXT_DIM, "%s", tr_stream_url());
-        draw_label(15, 140, 0.4f, CLR_ACCENT, "%s", url_display);
+    /* Diagnostic panel is useful when a stream is weak or unsupported, but
+     * does not expose a long URL as the primary playback information. */
+    const char *codec_name = stream_codec_name(
+        stream_player_get_codec(app.stream_player));
+    if (stream_player_get_codec(app.stream_player) == STREAM_CODEC_UNKNOWN &&
+        app.current_station->codec[0])
+        codec_name = app.current_station->codec;
+    draw_panel(8, 118, BOT_WIDTH - 16, 42);
+    draw_label(15, 126, 0.38f, CLR_TEXT_DIM, "%s: %s", tr_codec(), codec_name);
+    draw_label(15, 140, 0.38f, state_color, "%s", state_label);
+    if (player_state == STREAM_STATE_PLAYING ||
+        player_state == STREAM_STATE_PAUSED) {
+        draw_label(180, 140, 0.34f, CLR_TEXT_DIM, "%d Hz / %s",
+                   stream_player_get_sample_rate(app.stream_player),
+                   stream_player_get_channels(app.stream_player) == 1 ? "mono" : "stereo");
     }
+    if (player_state == STREAM_STATE_BUFFERING ||
+        player_state == STREAM_STATE_RECONNECTING)
+        draw_label(180, 140, 0.36f, CLR_TEXT_DIM, "%d%%",
+                   stream_player_get_buffer_percent(app.stream_player));
+    if (player_state == STREAM_STATE_ERROR)
+        draw_label(15, 153, 0.30f, CLR_ERR, "%s", tr_retry());
 
     draw_status_bar();
 }
@@ -710,24 +901,128 @@ static void render_playing(void) {
  * Screen: Search
  * ====================================================================== */
 
+static const char *SEARCH_LETTER_ROWS[] = {
+    "QWERTYUIOP",
+    "ASDFGHJKL",
+    "ZXCVBNM",
+};
+#define SEARCH_KEY_ROW_COUNT 3
+#define SEARCH_ACTION_COUNT 5
+#define SEARCH_CANDIDATES_PER_PAGE 4
+
+static const char *SEARCH_SYMBOL_ROWS[] = {
+    "1234567890",
+    "-/:;()$&@\"",
+    ".,?!'#+_%",
+};
+
+static const char *search_key_row(int row) {
+    if (row < 0 || row >= SEARCH_KEY_ROW_COUNT) return "";
+    return app.search_symbols ? SEARCH_SYMBOL_ROWS[row] : SEARCH_LETTER_ROWS[row];
+}
+
+static int search_character_key_count(void) {
+    int count = 0;
+    for (int i = 0; i < SEARCH_KEY_ROW_COUNT; i++)
+        count += (int)strlen(search_key_row(i));
+    return count;
+}
+
+static bool search_character_key_at(int index, char *out) {
+    for (int i = 0; i < SEARCH_KEY_ROW_COUNT; i++) {
+        const char *keys = search_key_row(i);
+        int row_len = (int)strlen(keys);
+        if (index < row_len) {
+            if (out) *out = keys[index];
+            return true;
+        }
+        index -= row_len;
+    }
+    return false;
+}
+
 static void render_search(void) {
     draw_hero_header(tr_search_header(), tr_search_prompt());
 
     select_bottom();
     clear_bottom();
 
-    /* Search input area using panel */
-    draw_panel(10, 20, BOT_WIDTH - 20, 40);
-    draw_label(20, 28, 0.35f, CLR_TEXT_DIM, "%s", tr_search_prompt());
-    draw_label(20, 42, 0.5f, CLR_ACCENT,
-               strlen(app.search_query) > 0 ? "%s_" : "%s",
-               app.search_query[0] ? app.search_query : tr_search_hint());
+    draw_panel(8, 3, BOT_WIDTH - 16, 27);
+    draw_label(16, 9, 0.43f, CLR_ACCENT, "%s",
+               search_input_query(&app.search_input));
+    if (search_input_composition(&app.search_input)[0])
+        draw_label(16 + (float)utf8_display_columns(
+                   search_input_query(&app.search_input)) * 7.0f,
+                   9, 0.40f, CLR_ACCENT2, "%s",
+                   search_input_composition(&app.search_input));
+    if (!search_input_query(&app.search_input)[0] &&
+        !search_input_composition(&app.search_input)[0])
+        draw_label(16, 9, 0.40f, CLR_TEXT_DIM, "%s", tr_search_hint());
 
-    /* Hint panel */
-    draw_panel(10, 80, BOT_WIDTH - 20, 55);
-    draw_label(20, 88, 0.35f, CLR_TEXT_DIM, "%s", tr_search_prompt());
-    draw_label(20, 102, 0.35f, CLR_TEXT_DIM, "%s", tr_search_action());
-    draw_label(20, 116, 0.35f, CLR_TEXT_DIM, "%s", tr_back());
+    if (app.search_query[0] && app.station_count == 0) {
+        draw_label(16, 62, 0.30f, CLR_WARN, "%s  %s",
+                   tr_no_stations(), tr_search_action());
+    }
+
+    draw_panel(8, 35, BOT_WIDTH - 16, 27);
+    int candidate_count = search_input_candidate_count(&app.search_input);
+    int page_count = (candidate_count + SEARCH_CANDIDATES_PER_PAGE - 1) /
+                     SEARCH_CANDIDATES_PER_PAGE;
+    if (page_count > 0 && app.search_candidate_page >= page_count)
+        app.search_candidate_page = page_count - 1;
+    int page_start = app.search_candidate_page * SEARCH_CANDIDATES_PER_PAGE;
+    int page_end = page_start + SEARCH_CANDIDATES_PER_PAGE;
+    if (page_end > candidate_count) page_end = candidate_count;
+    float candidate_x = 12.0f;
+    for (int i = page_start; i < page_end; i++) {
+        const char *candidate = search_input_candidate(&app.search_input, i);
+        char candidate_text[32];
+        copy_utf8_ellipsis(candidate_text, sizeof(candidate_text), candidate, 8);
+        float width = 22.0f + (float)utf8_display_columns(candidate_text) * 8.0f;
+        if (width < 42.0f) width = 42.0f;
+        if (width > 78.0f) width = 78.0f;
+        if (candidate_x + width > BOT_WIDTH - 8.0f) break;
+        bool selected = i == app.search_candidate_cursor;
+        if (selected && app.search_candidate_focus)
+            draw_selection(candidate_x, 38, width - 2.0f, 21);
+        draw_label(candidate_x + 7.0f, 42, 0.36f,
+                   selected ? CLR_ACCENT : CLR_TEXT_SEC, "%s", candidate_text);
+        candidate_x += width + 3.0f;
+    }
+
+    if (candidate_count > 0)
+        draw_label(274, 43, 0.28f, CLR_TEXT_DIM, "%d/%d",
+                   app.search_candidate_page + 1, page_count);
+
+    int cursor = 0;
+    for (int row = 0; row < SEARCH_KEY_ROW_COUNT; row++) {
+        const char *keys = search_key_row(row);
+        int key_count = (int)strlen(keys);
+        float key_w = 29.0f;
+        float start_x = row == 0 ? 4.0f : (row == 1 ? 19.0f : 50.0f);
+        for (int col = 0; col < key_count; col++, cursor++) {
+            int x = (int)(start_x + col * key_w);
+            int y = 68 + row * 34;
+            bool selected = !app.search_candidate_focus && cursor == app.search_cursor;
+            draw_button((float)x, (float)y, key_w - 2, 29, selected);
+            draw_label((float)x + 8, (float)y + 7, 0.38f,
+                       selected ? CLR_ACCENT : CLR_TEXT_SEC, "%c", keys[col]);
+        }
+    }
+
+    int action_base = search_character_key_count();
+    const char *actions[] = {"拼音", "符号", "空格", "清除", "搜索"};
+    const int action_x[] = {4, 76, 124, 192, 248};
+    const int action_w[] = {68, 44, 64, 52, 68};
+    const u32 action_colors[] = {CLR_ACCENT2, CLR_TEXT_SEC, CLR_TEXT_SEC,
+                                 CLR_WARN, CLR_ACCENT};
+    for (int i = 0; i < SEARCH_ACTION_COUNT; i++) {
+        bool selected = !app.search_candidate_focus &&
+                        app.search_cursor == action_base + i;
+        draw_button((float)action_x[i], 172, (float)action_w[i], 35, selected);
+        draw_label((float)action_x[i] + 8, 182, 0.34f,
+                   selected ? CLR_ACCENT : action_colors[i], "%s", actions[i]);
+    }
 
     draw_status_bar();
 }
@@ -754,11 +1049,16 @@ static void render_station_info(void) {
 
     int y = 60;
     draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_name());
-    draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->name);
+    char station_name[100];
+    copy_utf8_ellipsis(station_name, sizeof(station_name), s->name, 26);
+    draw_label(120, y, 0.45f, CLR_TEXT, "%s", station_name);
 
     y += 20;
     draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_country());
-    draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->country[0] ? s->country : tr_na());
+    char country[64];
+    copy_utf8_ellipsis(country, sizeof(country),
+                       s->country[0] ? s->country : tr_na(), 18);
+    draw_label(120, y, 0.45f, CLR_TEXT, "%s", country);
 
     y += 20;
     draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_codec());
@@ -770,7 +1070,10 @@ static void render_station_info(void) {
 
     y += 20;
     draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_language());
-    draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->language[0] ? s->language : tr_na());
+    char language[64];
+    copy_utf8_ellipsis(language, sizeof(language),
+                       s->language[0] ? s->language : tr_na(), 18);
+    draw_label(120, y, 0.45f, CLR_TEXT, "%s", language);
 
     y += 20;
     draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_votes());
@@ -789,13 +1092,59 @@ static void render_station_info(void) {
     if (strlen(s->tags) > 0) {
         draw_panel(8, 40, BOT_WIDTH - 16, 50);
         draw_label(15, 46, 0.35f, CLR_TEXT_DIM, "%s", tr_tags());
-        draw_label(15, 60, 0.4f, CLR_ACCENT, "%s", s->tags);
+            char tags_buf[120];
+            copy_utf8_ellipsis(tags_buf, sizeof(tags_buf), s->tags, 42);
+            draw_label(15, 60, 0.4f, CLR_ACCENT, "%s", tags_buf);
     }
 
     /* Back button */
     draw_panel(8, BOT_HEIGHT - 40, BOT_WIDTH - 16, 32);
     draw_label(15, BOT_HEIGHT - 35, 0.4f, CLR_TEXT_DIM, "%s", tr_back());
 
+    draw_status_bar();
+}
+
+static const char *settings_theme_label(void) {
+    return app.settings.theme == UI_THEME_DARK ? tr_theme_dark() : tr_theme_light();
+}
+
+static const char *settings_language_label(void) {
+    switch (app.settings.language) {
+        case LANG_EN: return tr_language_english();
+        case LANG_ZH_CN: return tr_language_chinese();
+        default: return tr_language_auto();
+    }
+}
+
+static void render_settings(void) {
+    draw_hero_header(tr_settings_header(), tr_about_tagline());
+
+    select_bottom();
+    clear_bottom();
+    draw_label(15, 8, 0.55f, CLR_TEXT_SEC, "%s", tr_settings_header());
+
+    const char *labels[] = {tr_theme(), tr_buffer_size(), tr_language(), tr_about_title()};
+    const char *values[] = {
+        settings_theme_label(),
+        app.settings.buffer_size == STREAM_BUF_SMALL ? tr_buffer_small() :
+            app.settings.buffer_size == STREAM_BUF_LARGE ? tr_buffer_large() : tr_buffer_medium(),
+        settings_language_label(),
+        "v1.1",
+    };
+
+    for (int i = 0; i < 4; i++) {
+        int y = 28 + i * 36;
+        bool selected = app.selection == i;
+        draw_button(10, y, BOT_WIDTH - 20, 32, selected);
+        draw_label(22, y + 6, 0.48f, selected ? CLR_TEXT : CLR_TEXT_SEC,
+                   "%s", labels[i]);
+        draw_label(BOT_WIDTH - 118, y + 6, 0.40f, selected ? CLR_ACCENT : CLR_TEXT_DIM,
+                   "%s", values[i]);
+    }
+
+    draw_panel(10, 180, BOT_WIDTH - 20, 36);
+    draw_label(20, 188, 0.36f, CLR_TEXT_DIM, "%s", tr_about_desc());
+    draw_label(20, 202, 0.36f, CLR_TEXT_DIM, "%s", tr_back());
     draw_status_bar();
 }
 
@@ -846,6 +1195,8 @@ static void handle_input(void) {
             /* SELECT cycles audio buffer size (Small → Medium → Large) */
             if (kDown & KEY_SELECT) {
                 app.buffer_size = (app.buffer_size + 1) % 3;
+                app.settings.buffer_size = app.buffer_size;
+                settings_save(&app.settings);
                 const char *size_names[] = {
                     tr_buffer_small(), tr_buffer_medium(), tr_buffer_large()
                 };
@@ -855,22 +1206,59 @@ static void handle_input(void) {
                     stream_player_destroy(app.stream_player);
                 }
                 app.stream_player = stream_player_create_with_bufsize(app.buffer_size);
+                if (app.stream_player)
+                    stream_player_set_volume(app.stream_player, app.volume);
+                else
+                    set_status("%s", CLR_ERR, tr_audio_init_failed());
             }
 
             if (kDown & KEY_A) {
                 switch (app.selection) {
-                    case 0: async_launch_load(ASYNC_REQ_LOAD_TAGS, ""); break;
-                    case 1: async_launch_load(ASYNC_REQ_LOAD_LANGUAGES, ""); break;
+                    case 0:
+                        if (app.tags_loaded) {
+                            app.selection = 0;
+                            app.scroll_offset = 0;
+                            app.screen = SCREEN_TAG_LIST;
+                        } else {
+                            async_launch_load(ASYNC_REQ_LOAD_TAGS, "");
+                        }
+                        break;
+                    case 1:
+                        if (app.languages_loaded) {
+                            app.selection = 0;
+                            app.scroll_offset = 0;
+                            app.screen = SCREEN_LANGUAGE_LIST;
+                        } else {
+                            async_launch_load(ASYNC_REQ_LOAD_LANGUAGES, "");
+                        }
+                        break;
                     case 2:
                         app.station_list_parent = SCREEN_MAIN_MENU;
-                        async_launch_load(ASYNC_REQ_LOAD_TOP_STATIONS, ""); break;
+                        if (app.top_loaded) {
+                            memcpy(app.stations, app.top_stations,
+                                   (size_t)app.top_count * sizeof(app.stations[0]));
+                            app.station_count = app.top_count;
+                            app.selection = 0;
+                            app.scroll_offset = 0;
+                            app.screen = SCREEN_STATION_LIST;
+                        } else {
+                            async_launch_load(ASYNC_REQ_LOAD_TOP_STATIONS, "");
+                        }
+                        break;
                     case 3:
                         memset(app.search_query, 0, sizeof(app.search_query));
                         app.search_cursor = 0;
+                        app.search_candidate_cursor = 0;
+                        app.search_candidate_page = 0;
+                        app.search_candidate_focus = false;
+                        app.search_symbols = false;
+                        search_input_destroy(&app.search_input);
+                        search_input_init(&app.search_input);
                         app.screen = SCREEN_SEARCH;
                         break;
                     case 4:
-                        set_status("%s", CLR_INFO, tr_about_tagline());
+                        app.screen = SCREEN_SETTINGS;
+                        app.selection = 0;
                         break;
                 }
             }
@@ -970,9 +1358,14 @@ static void handle_input(void) {
                         kDown |= KEY_A;
                 }
             }
-            if (kDown & KEY_A)
-                async_launch_load(ASYNC_REQ_PLAY_STATION,
-                                  app.stations[app.selection].stationuuid);
+            if (kDown & KEY_A) {
+                if (!stream_player_codec_supported(app.stations[app.selection].codec)) {
+                    set_status("%s", CLR_WARN, tr_codec_unsupported());
+                } else {
+                    async_launch_load(ASYNC_REQ_PLAY_STATION,
+                                      app.stations[app.selection].stationuuid);
+                }
+            }
             if (kDown & KEY_B) {
                 app.screen = app.station_list_parent;
                 app.selection = 0;
@@ -992,6 +1385,14 @@ static void handle_input(void) {
                     set_status("%s",
                               paused ? CLR_WARN : CLR_OK,
                               paused ? tr_paused() : tr_playing());
+                }
+            }
+            if (kDown & KEY_SELECT) {
+                StreamPlayerState state = stream_player_get_state(app.stream_player);
+                if (state == STREAM_STATE_ERROR || state == STREAM_STATE_ENDED) {
+                    int retry = stream_player_retry(app.stream_player);
+                    set_status("%s", retry == 0 ? CLR_INFO : CLR_ERR,
+                               retry == 0 ? tr_connecting_stream() : tr_stream_failed());
                 }
             }
             if (kDown & KEY_B) {
@@ -1038,28 +1439,271 @@ static void handle_input(void) {
                             app.volume = fmax(0.0f, app.volume - 0.1f);
                             if (app.stream_player)
                                 stream_player_set_volume(app.stream_player, app.volume);
+                            set_status("%s", CLR_INFO,
+                                       tr_volume_level((int)(app.volume * 100)));
                             break;
                         case 3:
                             app.volume = fmin(1.0f, app.volume + 0.1f);
                             if (app.stream_player)
                                 stream_player_set_volume(app.stream_player, app.volume);
+                            set_status("%s", CLR_INFO,
+                                       tr_volume_level((int)(app.volume * 100)));
                             break;
                     }
                 }
+            }
+            if (touch_active && touch.py >= 118 && touch.py <= 160 &&
+                (stream_player_get_state(app.stream_player) == STREAM_STATE_ERROR ||
+                 stream_player_get_state(app.stream_player) == STREAM_STATE_ENDED)) {
+                if (stream_player_retry(app.stream_player) == 0)
+                    set_status("%s", CLR_INFO, tr_connecting_stream());
             }
             break;
         }
 
         case SCREEN_SEARCH: {
-            if (kDown & KEY_A) {
-                if (strlen(app.search_query) > 0) {
-                    app.station_list_parent = SCREEN_MAIN_MENU;
-                    async_launch_load(ASYNC_REQ_SEARCH, app.search_query);
+            int char_count = search_character_key_count();
+            int action_base = char_count;
+            int total_keys = char_count + SEARCH_ACTION_COUNT;
+            int candidate_count = search_input_candidate_count(&app.search_input);
+            int candidate_pages = (candidate_count + SEARCH_CANDIDATES_PER_PAGE - 1) /
+                                  SEARCH_CANDIDATES_PER_PAGE;
+            bool activate = (kDown & KEY_A) != 0;
+            if (candidate_count == 0)
+                app.search_candidate_focus = false;
+
+            if (kDown & KEY_Y) {
+                app.search_symbols = !app.search_symbols;
+                app.search_candidate_focus = false;
+                set_status("%s", CLR_INFO,
+                           app.search_symbols ? "符号键盘" : "字母 / 拼音键盘");
+            }
+
+            if (kDown & KEY_LEFT) {
+                if (app.search_candidate_focus && candidate_count > 0) {
+                    app.search_candidate_cursor--;
+                    if (app.search_candidate_cursor < 0)
+                        app.search_candidate_cursor = candidate_count - 1;
+                    app.search_candidate_page =
+                        app.search_candidate_cursor / SEARCH_CANDIDATES_PER_PAGE;
+                } else {
+                    app.search_cursor = (app.search_cursor - 1 + total_keys) % total_keys;
+                }
+            }
+            if (kDown & KEY_RIGHT) {
+                if (app.search_candidate_focus && candidate_count > 0) {
+                    app.search_candidate_cursor =
+                        (app.search_candidate_cursor + 1) % candidate_count;
+                    app.search_candidate_page =
+                        app.search_candidate_cursor / SEARCH_CANDIDATES_PER_PAGE;
+                } else {
+                    app.search_cursor = (app.search_cursor + 1) % total_keys;
+                }
+            }
+            if (kDown & KEY_UP) {
+                if (candidate_count > 0 && !app.search_candidate_focus) {
+                    app.search_candidate_focus = true;
+                    app.search_candidate_cursor = app.search_candidate_page *
+                                                  SEARCH_CANDIDATES_PER_PAGE;
+                } else if (app.search_candidate_focus && candidate_pages > 1) {
+                    app.search_candidate_page =
+                        (app.search_candidate_page + candidate_pages - 1) % candidate_pages;
+                    app.search_candidate_cursor = app.search_candidate_page *
+                                                  SEARCH_CANDIDATES_PER_PAGE;
+                } else {
+                    app.search_cursor = (app.search_cursor - 1 + total_keys) % total_keys;
+                }
+            }
+            if (kDown & KEY_DOWN) {
+                if (app.search_candidate_focus && candidate_pages > 1) {
+                    app.search_candidate_page =
+                        (app.search_candidate_page + 1) % candidate_pages;
+                    app.search_candidate_cursor = app.search_candidate_page *
+                                                  SEARCH_CANDIDATES_PER_PAGE;
+                } else if (app.search_candidate_focus) {
+                    app.search_candidate_focus = false;
+                } else {
+                    app.search_cursor = (app.search_cursor + 1) % total_keys;
+                }
+            }
+
+            if (kDown & KEY_L && candidate_count > 0)
+                app.search_candidate_cursor =
+                    (app.search_candidate_cursor - 1 + candidate_count) % candidate_count;
+            if (kDown & KEY_R && candidate_count > 0)
+                app.search_candidate_cursor =
+                    (app.search_candidate_cursor + 1) % candidate_count;
+            if ((kDown & (KEY_L | KEY_R)) && candidate_count > 0) {
+                app.search_candidate_page = app.search_candidate_cursor /
+                                            SEARCH_CANDIDATES_PER_PAGE;
+                app.search_candidate_focus = true;
+            }
+
+            if (touch_active) {
+                if (touch.py >= 35 && touch.py < 62 && candidate_count > 0) {
+                    float x = 12.0f;
+                    for (int candidate = app.search_candidate_page *
+                         SEARCH_CANDIDATES_PER_PAGE;
+                         candidate < candidate_count && candidate <
+                         (app.search_candidate_page + 1) * SEARCH_CANDIDATES_PER_PAGE;
+                         candidate++) {
+                        const char *text = search_input_candidate(&app.search_input, candidate);
+                        char text_clipped[32];
+                        copy_utf8_ellipsis(text_clipped, sizeof(text_clipped), text, 8);
+                        float width = 22.0f +
+                                      (float)utf8_display_columns(text_clipped) * 8.0f;
+                        if (width < 42.0f) width = 42.0f;
+                        if (width > 78.0f) width = 78.0f;
+                        if ((float)touch.px >= x && (float)touch.px < x + width) {
+                            app.search_candidate_cursor = candidate;
+                            search_input_commit_candidate(&app.search_input, candidate);
+                            app.search_candidate_focus = false;
+                            app.search_candidate_page = 0;
+                            break;
+                        }
+                        x += width + 3.0f;
+                    }
+                } else if (touch.py >= 68 && touch.py < 165) {
+                    int row = (touch.py - 68) / 34;
+                    if (row >= 0 && row < SEARCH_KEY_ROW_COUNT) {
+                        int y = 68 + row * 34;
+                        int count = (int)strlen(search_key_row(row));
+                        float key_w = 29.0f;
+                        float start_x = row == 0 ? 4.0f : (row == 1 ? 19.0f : 50.0f);
+                        int col = (int)(((float)touch.px - start_x) / key_w);
+                        if (touch.py < y + 29 && col >= 0 && col < count) {
+                            app.search_cursor = 0;
+                            for (int r = 0; r < row; r++)
+                                app.search_cursor += (int)strlen(search_key_row(r));
+                            app.search_cursor += col;
+                            app.search_candidate_focus = false;
+                            activate = true;
+                        }
+                    }
+                } else if (touch.py >= 172 && touch.py < 207) {
+                    const int action_x[] = {4, 76, 124, 192, 248};
+                    const int action_w[] = {68, 44, 64, 52, 68};
+                    for (int action = 0; action < SEARCH_ACTION_COUNT; action++) {
+                        if (touch.px >= action_x[action] &&
+                            touch.px < action_x[action] + action_w[action]) {
+                            app.search_cursor = action_base + action;
+                            app.search_candidate_focus = false;
+                            activate = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (activate) {
+                if (app.search_candidate_focus && candidate_count > 0) {
+                    if (search_input_commit_candidate(&app.search_input,
+                                                      app.search_candidate_cursor)) {
+                        app.search_candidate_focus = false;
+                        app.search_candidate_page = 0;
+                    }
+                } else if (app.search_cursor < char_count) {
+                    char key;
+                    if (search_character_key_at(app.search_cursor, &key))
+                        search_input_append_ascii(&app.search_input, key);
+                    app.search_candidate_page = 0;
+                    app.search_candidate_cursor = 0;
+                } else if (app.search_cursor == action_base) {
+                    app.search_symbols = false;
+                } else if (app.search_cursor == action_base + 1) {
+                    app.search_symbols = true;
+                } else if (app.search_cursor == action_base + 2) {
+                    if (candidate_count > 0)
+                        search_input_commit_candidate(&app.search_input,
+                                                      app.search_candidate_cursor);
+                    else
+                        search_input_append_ascii(&app.search_input, ' ');
+                    app.search_candidate_page = 0;
+                    app.search_candidate_cursor = 0;
+                } else if (app.search_cursor == action_base + 3) {
+                    search_input_clear(&app.search_input);
+                    app.search_query[0] = '\0';
+                    app.search_candidate_page = 0;
+                    app.search_candidate_cursor = 0;
+                } else {
+                    if (candidate_count > 0)
+                        search_input_commit_candidate(&app.search_input,
+                                                      app.search_candidate_cursor);
+                    if (strlen(search_input_query(&app.search_input)) > 0) {
+                        strncpy(app.search_query, search_input_query(&app.search_input),
+                                sizeof(app.search_query) - 1);
+                        app.search_query[sizeof(app.search_query) - 1] = '\0';
+                        app.station_list_parent = SCREEN_MAIN_MENU;
+                        async_launch_load(ASYNC_REQ_SEARCH, app.search_query);
+                    }
                 }
             }
             if (kDown & KEY_B) {
+                if (search_input_composition(&app.search_input)[0]) {
+                    search_input_backspace(&app.search_input);
+                    app.search_candidate_focus = false;
+                    app.search_candidate_page = 0;
+                    app.search_candidate_cursor = 0;
+                } else {
+                    app.screen = SCREEN_MAIN_MENU;
+                    app.selection = 0;
+                }
+            }
+            break;
+        }
+
+        case SCREEN_SETTINGS: {
+            if (kDown & KEY_DOWN)
+                app.selection = (app.selection + 1) % 4;
+            if (kDown & KEY_UP)
+                app.selection = (app.selection - 1 + 4) % 4;
+
+            int direction = 0;
+            if (kDown & KEY_LEFT) direction = -1;
+            if (kDown & KEY_RIGHT) direction = 1;
+            if (kDown & KEY_A && app.selection < 3) direction = 1;
+
+            if (touch_active && touch.py >= 28 && touch.py < 172) {
+                int idx = (touch.py - 28) / 36;
+                if (idx >= 0 && idx < 4) {
+                    app.selection = idx;
+                    if (touch.px >= 10 && touch.px <= BOT_WIDTH - 10 && idx < 3)
+                        direction = 1;
+                }
+            }
+
+            if (direction != 0) {
+                if (app.selection == 0) {
+                    app.settings.theme = app.settings.theme == UI_THEME_DARK
+                        ? UI_THEME_LIGHT : UI_THEME_DARK;
+                    load_theme(app.settings.theme);
+                } else if (app.selection == 1) {
+                    int value = app.settings.buffer_size + direction;
+                    if (value < STREAM_BUF_SMALL) value = STREAM_BUF_LARGE;
+                    if (value > STREAM_BUF_LARGE) value = STREAM_BUF_SMALL;
+                    app.settings.buffer_size = value;
+                    if (app.stream_player) {
+                        stream_player_destroy(app.stream_player);
+                    }
+                    app.stream_player = stream_player_create_with_bufsize(value);
+                    if (app.stream_player)
+                        stream_player_set_volume(app.stream_player, app.volume);
+                    else
+                        set_status("%s", CLR_ERR, tr_audio_init_failed());
+                } else if (app.selection == 2) {
+                    int value = app.settings.language + direction;
+                    if (value < LANG_AUTO) value = LANG_ZH_CN;
+                    if (value > LANG_ZH_CN) value = LANG_AUTO;
+                    app.settings.language = value;
+                    locale_set_language((Language)value);
+                }
+                settings_save(&app.settings);
+                set_status("%s", CLR_OK, tr_saved());
+            }
+            if (kDown & KEY_B) {
+                settings_save(&app.settings);
                 app.screen = SCREEN_MAIN_MENU;
-                app.selection = 0;
+                app.selection = 4;
             }
             break;
         }
@@ -1086,7 +1730,8 @@ static int async_cancel_cb(void *data) {
 }
 
 static void async_worker_thread(void *arg) {
-    AsyncRequest *req = &app.async.request;
+    (void)arg;
+    AsyncRequest req = app.async.request;
     char error[128] = {0};
     int count = 0;
     u32 gen = app.async.load_generation;
@@ -1095,45 +1740,46 @@ static void async_worker_thread(void *arg) {
      * clears in async_handle_completion; it aborts this worker's in-flight
      * request when the user cancels or a timeout fires. */
 
-    switch (req->type) {
+    switch (req.type) {
         case ASYNC_REQ_LOAD_TAGS:
             count = radio_fetch_tags(app.tags, MAX_TAGS, error, sizeof(error));
-            if (count > 0) app.tag_count = count;
+            app.tag_count = count > 0 ? count : 0;
             break;
 
         case ASYNC_REQ_LOAD_LANGUAGES:
             count = radio_fetch_languages(app.languages, MAX_TAGS, error, sizeof(error));
-            if (count > 0) app.language_count = count;
+            app.language_count = count > 0 ? count : 0;
             break;
 
         case ASYNC_REQ_LOAD_STATIONS_BY_TAG:
-            count = radio_fetch_by_tag(req->param, app.stations, MAX_STATIONS,
-                                        error, sizeof(error));
-            if (count > 0) app.station_count = count;
+            count = radio_fetch_by_tag(req.param, app.stations, MAX_STATIONS,
+                                       error, sizeof(error));
+            app.station_count = count > 0 ? count : 0;
             break;
 
         case ASYNC_REQ_LOAD_STATIONS_BY_LANGUAGE:
-            count = radio_fetch_by_language(req->param, app.stations, MAX_STATIONS,
+            count = radio_fetch_by_language(req.param, app.stations, MAX_STATIONS,
                                              error, sizeof(error));
-            if (count > 0) app.station_count = count;
+            app.station_count = count > 0 ? count : 0;
             break;
 
         case ASYNC_REQ_LOAD_TOP_STATIONS:
-            count = radio_fetch_topclick(app.stations, MAX_STATIONS, error, sizeof(error));
-            if (count > 0) app.station_count = count;
+            count = radio_fetch_topclick(app.top_stations, MAX_STATIONS,
+                                         error, sizeof(error));
+            app.top_count = count > 0 ? count : 0;
             break;
 
         case ASYNC_REQ_SEARCH:
-            count = radio_search_by_name(req->param, app.stations, MAX_STATIONS,
+            count = radio_search_by_name(req.param, app.stations, MAX_STATIONS,
                                           error, sizeof(error));
-            if (count > 0) app.station_count = count;
+            app.station_count = count > 0 ? count : 0;
             break;
 
         case ASYNC_REQ_PLAY_STATION: {
             /* Get stream URL, then fall back to url_resolved / url */
             int idx = -1;
             for (int i = 0; i < app.station_count; i++) {
-                if (strcmp(app.stations[i].stationuuid, req->param) == 0) {
+                if (strcmp(app.stations[i].stationuuid, req.param) == 0) {
                     idx = i; break;
                 }
             }
@@ -1143,16 +1789,18 @@ static void async_worker_thread(void *arg) {
                 break;
             }
             app.current_station = &app.stations[idx];
-            int ret = radio_get_stream_url(req->param, app.stream_url,
+            int ret = radio_get_stream_url(req.param, app.stream_url,
                                             sizeof(app.stream_url), error, sizeof(error));
             if (ret != NET_OK || strlen(app.stream_url) == 0) {
                 if (strlen(app.current_station->url_resolved) > 0) {
                     strncpy(app.stream_url, app.current_station->url_resolved,
                             sizeof(app.stream_url) - 1);
+                    app.stream_url[sizeof(app.stream_url) - 1] = '\0';
                     count = 0; /* Success with fallback */
                 } else if (strlen(app.current_station->url) > 0) {
                     strncpy(app.stream_url, app.current_station->url,
                             sizeof(app.stream_url) - 1);
+                    app.stream_url[sizeof(app.stream_url) - 1] = '\0';
                     count = 0;
                 } else {
                     count = -1;
@@ -1194,11 +1842,9 @@ static void async_launch_load(AsyncRequestType type, const char *param) {
     if (app.async.state != ASYNC_IDLE) return;
 
     /* WiFi check for network requests */
-    if (type != ASYNC_REQ_PLAY_STATION || true) {
-        if (!net_wifi_status() && type != ASYNC_REQ_PLAY_STATION) {
-            set_status("%s", CLR_ERR, tr_wifi_error());
-            return;
-        }
+    if (!net_wifi_status()) {
+        set_status("%s", CLR_ERR, tr_wifi_error());
+        return;
     }
 
     /* Set status based on request type */
@@ -1224,6 +1870,31 @@ static void async_launch_load(AsyncRequestType type, const char *param) {
         app.async.request.param[sizeof(app.async.request.param) - 1] = '\0';
     } else {
         app.async.request.param[0] = '\0';
+    }
+
+    /* Clear the target collection before a new request.  An empty response
+     * must not leave the previous page visible as if it succeeded. */
+    switch (type) {
+        case ASYNC_REQ_LOAD_TAGS:
+            app.tag_count = 0;
+            app.tags_loaded = false;
+            break;
+        case ASYNC_REQ_LOAD_LANGUAGES:
+            app.language_count = 0;
+            app.languages_loaded = false;
+            break;
+        case ASYNC_REQ_LOAD_STATIONS_BY_TAG:
+        case ASYNC_REQ_LOAD_STATIONS_BY_LANGUAGE:
+        case ASYNC_REQ_SEARCH:
+            app.station_count = 0;
+            break;
+        case ASYNC_REQ_LOAD_TOP_STATIONS:
+            app.station_count = 0;
+            app.top_count = 0;
+            app.top_loaded = false;
+            break;
+        default:
+            break;
     }
 
     app.async.cancel_requested = false;
@@ -1255,14 +1926,15 @@ static void async_launch_load(AsyncRequestType type, const char *param) {
 static void async_handle_completion(void) {
     Thread t = app.async.worker_thread;
     if (t) {
-        /* Bounded join: a stuck worker (wedged network) must never freeze the
-         * main loop forever. If it doesn't exit in time, detach and let it
-         * finish on its own — the generation guard stops it from publishing
-         * stale results after a later load starts. */
+        /* The worker publishes its terminal state immediately before return.
+         * A very short join avoids freezing rendering while still keeping the
+         * thread handle and cancellation hook alive until it really exits. */
         if (threadJoin(t, ASYNC_JOIN_TIMEOUT_NS) == 0) {
             threadFree(t);
+            app.async.worker_thread = 0;
+        } else {
+            return;
         }
-        app.async.worker_thread = 0;
     }
 
     /* This load has ended; stop cancelling requests. */
@@ -1274,40 +1946,63 @@ static void async_handle_completion(void) {
         case ASYNC_DONE:
             switch (app.async.request.type) {
                 case ASYNC_REQ_LOAD_TAGS:
-                    app.selection = 0;
-                    app.scroll_offset = 0;
-                    app.screen = SCREEN_TAG_LIST;
-                    set_status("%s", CLR_OK, tr_genres_loaded(count));
+                    app.tags_loaded = count > 0;
+                    if (count > 0) {
+                        app.selection = 0;
+                        app.scroll_offset = 0;
+                        app.screen = SCREEN_TAG_LIST;
+                        set_status("%s", CLR_OK, tr_genres_loaded(count));
+                    } else {
+                        set_status("%s", CLR_WARN, tr_no_stations());
+                    }
                     break;
 
                 case ASYNC_REQ_LOAD_LANGUAGES:
-                    app.selection = 0;
-                    app.scroll_offset = 0;
-                    app.screen = SCREEN_LANGUAGE_LIST;
-                    set_status("%s", CLR_OK, tr_languages_loaded(count));
+                    app.languages_loaded = count > 0;
+                    if (count > 0) {
+                        app.selection = 0;
+                        app.scroll_offset = 0;
+                        app.screen = SCREEN_LANGUAGE_LIST;
+                        set_status("%s", CLR_OK, tr_languages_loaded(count));
+                    } else {
+                        set_status("%s", CLR_WARN, tr_no_stations());
+                    }
                     break;
 
                 case ASYNC_REQ_LOAD_STATIONS_BY_TAG:
                 case ASYNC_REQ_LOAD_STATIONS_BY_LANGUAGE:
                 case ASYNC_REQ_LOAD_TOP_STATIONS:
                 case ASYNC_REQ_SEARCH:
-                    app.selection = 0;
-                    app.scroll_offset = 0;
-                    app.screen = SCREEN_STATION_LIST;
-                    set_status("%s", CLR_OK, tr_stations_found(count));
+                    if (count > 0) {
+                        if (app.async.request.type == ASYNC_REQ_LOAD_TOP_STATIONS) {
+                            memcpy(app.stations, app.top_stations,
+                                   (size_t)count * sizeof(app.stations[0]));
+                            app.station_count = count;
+                            app.top_loaded = true;
+                        }
+                        app.selection = 0;
+                        app.scroll_offset = 0;
+                        app.screen = SCREEN_STATION_LIST;
+                        set_status("%s", CLR_OK, tr_stations_found(count));
+                    } else {
+                        set_status("%s", CLR_WARN, tr_no_stations());
+                    }
                     break;
 
                 case ASYNC_REQ_PLAY_STATION:
                     if (app.stream_player && app.current_station) {
                         stream_player_stop(app.stream_player);
-                        int r = stream_player_play(app.stream_player, app.stream_url);
+                        int r = stream_player_play_with_codec(
+                            app.stream_player, app.stream_url,
+                            app.current_station->codec);
                         if (r == 0) {
                             app.is_playing = true;
                             app.play_start_tick = svcGetSystemTick();
                             app.screen = SCREEN_PLAYING;
                             set_status("%s", CLR_OK, tr_streaming());
                         } else {
-                            set_status("%s", CLR_ERR, tr_stream_failed());
+                            set_status("%s", CLR_ERR,
+                                       r == -2 ? tr_codec_unsupported() : tr_stream_failed());
                         }
                     }
                     break;
@@ -1399,12 +2094,15 @@ int main(void) {
     /* Global text buffer - larger for CJK glyph storage */
     global_text_buf = C2D_TextBufNew(32768);
 
+    memset(&app, 0, sizeof(app));
+    settings_load(&app.settings);
+    locale_set_language((Language)app.settings.language);
+
     /* Initialize networking */
-    net_init();
+    int net_result = net_init();
     radio_init();
 
-    /* Set Chinese language and try to load Chinese font */
-    locale_set_language(LANG_ZH_CN);
+    /* Load the configured language font. */
     romfsInit();
     if (locale_init_fonts()) {
         active_font = locale_get_font();
@@ -1412,19 +2110,23 @@ int main(void) {
 
     /* Load UI skin texture atlas */
     ui_skin_init(&skin);
-    if (!ui_skin_load(&skin, "romfs:/ui-skin-light.png")) {
+    if (!load_theme(app.settings.theme)) {
         /* Skin load failed — will use solid-color fallbacks throughout */
         set_status("%s", CLR_WARN, tr_skin_fallback());
     }
 
     /* App state */
-    memset(&app, 0, sizeof(app));
     app.screen = SCREEN_MAIN_MENU;
     app.volume = 0.8f;
-    app.buffer_size = STREAM_BUF_MEDIUM;
+    app.buffer_size = (StreamBufSize)app.settings.buffer_size;
 
-    set_status("%s", CLR_INFO, tr_welcome());
+    if (net_result != NET_OK)
+        set_status("%s", CLR_ERR, tr_wifi_error());
+    else
+        set_status("%s", CLR_INFO, tr_welcome());
     app.stream_player = stream_player_create_with_bufsize(app.buffer_size);
+    if (!app.stream_player)
+        set_status("%s", CLR_ERR, tr_audio_init_failed());
 
     /* Main loop */
     while (aptMainLoop()) {
@@ -1484,6 +2186,7 @@ int main(void) {
             case SCREEN_STATION_LIST: render_station_list(); break;
             case SCREEN_PLAYING:      render_playing(); break;
             case SCREEN_SEARCH:       render_search(); break;
+            case SCREEN_SETTINGS:     render_settings(); break;
             case SCREEN_STATION_INFO: render_station_info(); break;
         }
 
@@ -1497,6 +2200,7 @@ int main(void) {
     }
 
     /* Cleanup */
+    search_input_destroy(&app.search_input);
     stream_player_destroy(app.stream_player);
     ui_skin_clear(&skin);
     radio_exit();

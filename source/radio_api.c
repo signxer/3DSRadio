@@ -50,7 +50,7 @@ void radio_set_cancel_hook(NetCancelFn fn, void *data) {
 }
 
 void radio_init(void) {
-    snprintf(user_agent, sizeof(user_agent), "3DSRadio/1.0");
+    snprintf(user_agent, sizeof(user_agent), "3DSRadio/1.1");
     initialized = true;
 }
 
@@ -101,39 +101,30 @@ static int radio_http_get(const char *path, char **buffer, size_t *buffer_size,
     return last_ret;
 }
 
-/* URL-encode a string (simplified - handles spaces and basic chars) */
+/* RFC 3986 URL-encode a query/path parameter.  In particular, reserve
+ * percent, plus, question-mark, hash, slash, ampersand and equals so a
+ * station name cannot alter the API request structure. */
 static void url_encode(const char *src, char *dst, size_t dst_size) {
     size_t pos = 0;
+    if (!dst || dst_size == 0) return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
     for (const char *s = src; *s && pos < dst_size - 1; s++) {
         unsigned char c = (unsigned char)*s;
-        if (c == ' ') {
-            if (pos + 3 > dst_size) break;
-            dst[pos++] = '%';
-            dst[pos++] = '2';
-            dst[pos++] = '0';
-        } else if (c == '&') {
-            if (pos + 3 > dst_size) break;
-            dst[pos++] = '%';
-            dst[pos++] = '2';
-            dst[pos++] = '6';
-        } else if (c == '=') {
-            if (pos + 3 > dst_size) break;
-            dst[pos++] = '%';
-            dst[pos++] = '3';
-            dst[pos++] = 'D';
-        } else if (c == '/') {
-            if (pos + 3 > dst_size) break;
-            dst[pos++] = '%';
-            dst[pos++] = '2';
-            dst[pos++] = 'F';
-        } else if (c < 0x20 || c > 0x7E) {
+        bool unreserved = (c >= 'a' && c <= 'z') ||
+                          (c >= 'A' && c <= 'Z') ||
+                          (c >= '0' && c <= '9') ||
+                          c == '-' || c == '_' || c == '.' || c == '~';
+        if (unreserved) {
+            dst[pos++] = (char)c;
+        } else {
             if (pos + 3 > dst_size) break;
             dst[pos++] = '%';
             static const char hex[] = "0123456789ABCDEF";
             dst[pos++] = hex[c >> 4];
             dst[pos++] = hex[c & 0xF];
-        } else {
-            dst[pos++] = c;
         }
     }
     dst[pos] = '\0';

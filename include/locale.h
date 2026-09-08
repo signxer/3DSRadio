@@ -121,3 +121,21 @@ const char *tr_languages_available(int count);
 const char *tr_nav_hint_languages(void);
 const char *tr_loading_languages(void);
 const char *tr_languages_loaded(int count);
+
+/* Settings and player diagnostics */
+const char *tr_menu_settings(void);
+const char *tr_settings_header(void);
+const char *tr_theme(void);
+const char *tr_theme_light(void);
+const char *tr_theme_dark(void);
+const char *tr_language_auto(void);
+const char *tr_language_english(void);
+const char *tr_language_chinese(void);
+const char *tr_saved(void);
+const char *tr_buffering(void);
+const char *tr_reconnecting(void);
+const char *tr_stream_ended(void);
+const char *tr_codec_unsupported(void);
+const char *tr_no_stations(void);
+const char *tr_retry(void);
+const char *tr_audio_init_failed(void);
