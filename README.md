@@ -11,6 +11,8 @@ A native homebrew internet radio client for the Nintendo 3DS, powered by [radio-
 - Now Playing screen with station info
 - Full dual-screen interface
 - Light and dark themes with saved preferences
+- ClouDS-inspired tabbed shell, radio visualizer, icon-led controls, and
+  touch/D-pad parity
 - Touch search keyboard with QWERTY/symbol layouts and a paged Chinese pinyin candidate set
 - MP3 and OGG/Vorbis playback with prebuffering, ICY stripping, and retry
 

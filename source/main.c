@@ -17,16 +17,17 @@
 #include "search_input.h"
 
 /* ======================================================================
- * 3DSRadio - Apple-Light UI Design
- * Skin-based rendering powered by ClouDS-Music-FA texture atlas
+ * 3DSRadio - ClouDS-inspired dual-screen UI
+ * Skin-based rendering and interaction hierarchy adapted from
+ * ClouDS-Music-FA, with radio-specific controls and diagnostics.
  *
  * Design philosophy:
  * - Texture atlas (ui-skin-light.png) for all UI chrome
  * - Nine-slice scaling for buttons, panels, headers, selections
  * - Top screen: content/art/visualization (hero)
  * - Bottom screen: navigation/lists/controls (functional)
- * - Light theme: dark text on light for maximum legibility at 3DS PPI
- * - Single semantic accent (systemBlue) + iOS status colors
+ * - Both themes use a high-contrast ink/accent system tuned for 3DS PPI
+ * - Bottom screen behaves as a stable tabbed application shell
  * - Touch + button dual input
  * ====================================================================== */
 
@@ -37,7 +38,7 @@
 #define BOT_HEIGHT 240
 
 /* Maximum items */
-#define MAX_VISIBLE_ITEMS 8
+#define MAX_VISIBLE_ITEMS 7
 #define MAX_STATIONS 100
 #define MAX_TAGS 50
 
@@ -74,27 +75,29 @@ static void apply_theme_palette(UiTheme theme) {
     CLR_WARN = C2D_Color32(0xFF, 0x95, 0x00, 0xFF);
     CLR_INFO = C2D_Color32(0x00, 0x7A, 0xFF, 0xFF);
     if (theme == UI_THEME_DARK) {
-        CLR_BG_TOP = C2D_Color32(0x1B, 0x1C, 0x20, 0xFF);
-        CLR_BG_BOT = C2D_Color32(0x10, 0x11, 0x14, 0xFF);
-        CLR_SURFACE = C2D_Color32(0x25, 0x26, 0x2B, 0xFF);
-        CLR_SURFACE_LT = C2D_Color32(0x34, 0x36, 0x40, 0xFF);
-        CLR_TEXT = C2D_Color32(0xF5, 0xF5, 0xF7, 0xFF);
-        CLR_TEXT_SEC = C2D_Color32(0xC7, 0xC7, 0xCC, 0xFF);
-        CLR_TEXT_DIM = C2D_Color32(0x8E, 0x8E, 0x93, 0xFF);
-        CLR_ACCENT = C2D_Color32(0x64, 0xB5, 0xFF, 0xFF);
-        CLR_ACCENT2 = C2D_Color32(0xD0, 0x8C, 0xFF, 0xFF);
-        CLR_STATUSBAR = C2D_Color32(0x2C, 0x2D, 0x33, 0xFF);
+        /* ClouDS-inspired dark canvas: near-black stage, cool ink, teal
+         * interaction accents and coral play/action colour. */
+        CLR_BG_TOP = C2D_Color32(0x0B, 0x0D, 0x12, 0xFF);
+        CLR_BG_BOT = C2D_Color32(0x08, 0x0A, 0x0F, 0xFF);
+        CLR_SURFACE = C2D_Color32(0x14, 0x17, 0x22, 0xFF);
+        CLR_SURFACE_LT = C2D_Color32(0x22, 0x27, 0x36, 0xFF);
+        CLR_TEXT = C2D_Color32(0xF2, 0xF4, 0xF7, 0xFF);
+        CLR_TEXT_SEC = C2D_Color32(0xA9, 0xB2, 0xC7, 0xFF);
+        CLR_TEXT_DIM = C2D_Color32(0x69, 0x74, 0x8D, 0xFF);
+        CLR_ACCENT = C2D_Color32(0x59, 0xD0, 0xD8, 0xFF);
+        CLR_ACCENT2 = C2D_Color32(0xEB, 0x5B, 0x75, 0xFF);
+        CLR_STATUSBAR = C2D_Color32(0x14, 0x17, 0x22, 0xFF);
     } else {
-        CLR_BG_TOP = C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF);
-        CLR_BG_BOT = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
-        CLR_SURFACE = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
-        CLR_SURFACE_LT = C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF);
-        CLR_TEXT = C2D_Color32(0x1C, 0x1C, 0x1E, 0xFF);
-        CLR_TEXT_SEC = C2D_Color32(0x48, 0x48, 0x4A, 0xFF);
-        CLR_TEXT_DIM = C2D_Color32(0x8E, 0x8E, 0x93, 0xFF);
-        CLR_ACCENT = C2D_Color32(0x00, 0x7A, 0xFF, 0xFF);
-        CLR_ACCENT2 = C2D_Color32(0xAF, 0x52, 0xDE, 0xFF);
-        CLR_STATUSBAR = C2D_Color32(0xE5, 0xE5, 0xEA, 0xFF);
+        CLR_BG_TOP = C2D_Color32(0xF0, 0xF4, 0xF5, 0xFF);
+        CLR_BG_BOT = C2D_Color32(0xE6, 0xED, 0xF0, 0xFF);
+        CLR_SURFACE = C2D_Color32(0xF8, 0xFA, 0xFA, 0xFF);
+        CLR_SURFACE_LT = C2D_Color32(0xD7, 0xE7, 0xEB, 0xFF);
+        CLR_TEXT = C2D_Color32(0x16, 0x32, 0x44, 0xFF);
+        CLR_TEXT_SEC = C2D_Color32(0x48, 0x65, 0x72, 0xFF);
+        CLR_TEXT_DIM = C2D_Color32(0x74, 0x8D, 0x98, 0xFF);
+        CLR_ACCENT = C2D_Color32(0x2E, 0xA4, 0xB7, 0xFF);
+        CLR_ACCENT2 = C2D_Color32(0xE9, 0x5B, 0x70, 0xFF);
+        CLR_STATUSBAR = C2D_Color32(0xD8, 0xE5, 0xE8, 0xFF);
     }
 }
 
@@ -164,11 +167,9 @@ typedef enum {
     SCREEN_STATION_INFO,
 } AppScreen;
 
-/* Menu items */
-#define MAIN_MENU_COUNT 5
-
 typedef struct {
     AppScreen screen;
+    int main_tab;            /* 0 now playing, 1 discover, 2 settings */
     int selection;
     int scroll_offset;
     int prev_screen;
@@ -383,6 +384,109 @@ static void draw_label(float x, float y, float size, u32 color,
     C2D_DrawText(&c2d_text, C2D_WithColor, x, y, 0.5f, size, size, color);
 }
 
+/* ----------------------------------------------------------------------
+ * ClouDS-style icon language
+ * ----------------------------------------------------------------------
+ * The atlas still supplies the small, polished system glyphs (search,
+ * speaker, gear and keycaps). These vector marks fill the gaps that the old
+ * UI represented with raw letters or a lonely "R". They are deliberately
+ * built from rectangles/circles/triangles: no extra texture memory, crisp on
+ * the 3DS and identical in light/dark themes.
+ */
+static void draw_icon_radio(float x, float y, float size, u32 color) {
+    float r = size * 0.36f;
+    C2D_DrawCircleSolid(x + size * 0.50f, y + size * 0.54f,
+                        0.4f, r, color);
+    C2D_DrawCircleSolid(x + size * 0.50f, y + size * 0.54f,
+                        0.5f, r * 0.58f, CLR_SURFACE);
+    C2D_DrawRectSolid(x + size * 0.18f, y + size * 0.76f,
+                      0.5f, size * 0.64f, size * 0.10f, color);
+    C2D_DrawRectSolid(x + size * 0.30f, y + size * 0.30f,
+                      0.5f, size * 0.08f, size * 0.20f, color);
+    C2D_DrawRectSolid(x + size * 0.46f, y + size * 0.20f,
+                      0.5f, size * 0.08f, size * 0.30f, color);
+    C2D_DrawRectSolid(x + size * 0.62f, y + size * 0.10f,
+                      0.5f, size * 0.08f, size * 0.40f, color);
+}
+
+static void draw_icon_play(float x, float y, float size, u32 color) {
+    C2D_DrawTriangle(x + size * 0.28f, y + size * 0.18f, color,
+                     x + size * 0.28f, y + size * 0.82f, color,
+                     x + size * 0.78f, y + size * 0.50f, color, 0.5f);
+}
+
+static void draw_icon_pause(float x, float y, float size, u32 color) {
+    C2D_DrawRectSolid(x + size * 0.28f, y + size * 0.18f,
+                      0.5f, size * 0.16f, size * 0.64f, color);
+    C2D_DrawRectSolid(x + size * 0.56f, y + size * 0.18f,
+                      0.5f, size * 0.16f, size * 0.64f, color);
+}
+
+static void draw_icon_stop(float x, float y, float size, u32 color) {
+    C2D_DrawRectSolid(x + size * 0.24f, y + size * 0.24f,
+                      0.5f, size * 0.52f, size * 0.52f, color);
+}
+
+static void draw_icon_globe(float x, float y, float size, u32 color) {
+    C2D_DrawCircleSolid(x + size * 0.50f, y + size * 0.50f,
+                        0.5f, size * 0.36f, color);
+    C2D_DrawCircleSolid(x + size * 0.50f, y + size * 0.50f,
+                        0.6f, size * 0.27f, CLR_SURFACE);
+    C2D_DrawRectSolid(x + size * 0.16f, y + size * 0.46f,
+                      0.5f, size * 0.68f, size * 0.08f, color);
+    C2D_DrawRectSolid(x + size * 0.46f, y + size * 0.16f,
+                      0.5f, size * 0.08f, size * 0.68f, color);
+}
+
+static void draw_icon_search(float x, float y, float size, u32 color) {
+    C2D_DrawCircleSolid(x + size * 0.40f, y + size * 0.40f,
+                        0.5f, size * 0.24f, color);
+    C2D_DrawCircleSolid(x + size * 0.40f, y + size * 0.40f,
+                        0.6f, size * 0.14f, CLR_SURFACE);
+    C2D_DrawRectSolid(x + size * 0.58f, y + size * 0.58f,
+                      0.5f, size * 0.28f, size * 0.10f, color);
+}
+
+static void draw_icon_list(float x, float y, float size, u32 color) {
+    for (int row = 0; row < 3; row++) {
+        float yy = y + size * (0.22f + row * 0.28f);
+        C2D_DrawRectSolid(x + size * 0.10f, yy, 0.5f,
+                          size * 0.10f, size * 0.10f, color);
+        C2D_DrawRectSolid(x + size * 0.30f, yy, 0.5f,
+                          size * 0.58f, size * 0.10f, color);
+    }
+}
+
+static void draw_icon_gear(float x, float y, float size, u32 color) {
+    C2D_DrawCircleSolid(x + size * 0.50f, y + size * 0.50f,
+                        0.5f, size * 0.34f, color);
+    C2D_DrawCircleSolid(x + size * 0.50f, y + size * 0.50f,
+                        0.6f, size * 0.13f, CLR_SURFACE);
+    for (int i = 0; i < 4; i++) {
+        float xx = (i & 1) ? x + size * 0.86f : x + size * 0.06f;
+        float yy = (i & 2) ? y + size * 0.86f : y + size * 0.06f;
+        C2D_DrawRectSolid(xx, yy, 0.5f, size * 0.08f,
+                          size * 0.08f, color);
+    }
+}
+
+static void draw_icon_volume(float x, float y, float size, u32 color) {
+    C2D_DrawTriangle(x + size * 0.16f, y + size * 0.42f, color,
+                     x + size * 0.38f, y + size * 0.42f, color,
+                     x + size * 0.38f, y + size * 0.18f, color, 0.5f);
+    C2D_DrawRectSolid(x + size * 0.38f, y + size * 0.18f,
+                      0.5f, size * 0.18f, size * 0.64f, color);
+    C2D_DrawRectSolid(x + size * 0.68f, y + size * 0.30f,
+                      0.5f, size * 0.08f, size * 0.40f, color);
+}
+
+static void draw_icon_chevron(float x, float y, float size, u32 color) {
+    C2D_DrawRectSolid(x + size * 0.25f, y + size * 0.20f,
+                      0.5f, size * 0.12f, size * 0.60f, color);
+    C2D_DrawRectSolid(x + size * 0.25f, y + size * 0.20f,
+                      0.5f, size * 0.48f, size * 0.12f, color);
+}
+
 static const char *stream_codec_name(StreamCodec codec) {
     switch (codec) {
         case STREAM_CODEC_MP3: return "MP3";
@@ -470,7 +574,10 @@ static void draw_status_bar(void) {
         C2D_DrawRectSolid(0, TOP_HEIGHT - 26, 0.5f, TOP_WIDTH, 26, CLR_STATUSBAR);
     }
 
-    draw_label(10, TOP_HEIGHT - 21, 0.5f, CLR_TEXT_DIM, "%s", tr_about_title());
+    if (skin.ready)
+        ui_skin_draw_tinted(&skin, UI_SKIN_FOOTER_SPEAKER,
+                            7, TOP_HEIGHT - 22, 0.4f, 16, 16, CLR_TEXT_DIM);
+    draw_label(29, TOP_HEIGHT - 21, 0.40f, CLR_TEXT_DIM, "3DSRadio");
 
     /* Center slot: transient status message while active, otherwise the
      * buffer-size indicator. Both fit on one 0.5f line without colliding
@@ -504,59 +611,203 @@ static void draw_status_bar(void) {
 static void draw_hero_header(const char *title, const char *subtitle) {
     select_top();
     clear_top();
-    draw_gradient(0, 0, TOP_WIDTH, 60, 0xFFFFFFFF, 0x00000000);
-
-    draw_label(20, 10, 0.9f, CLR_TEXT, "%s", title);
-    if (subtitle) {
-        draw_label(20, 40, 0.55f, CLR_TEXT_SEC, "%s", subtitle);
+    draw_gradient(0, 0, TOP_WIDTH, TOP_HEIGHT,
+                  app.settings.theme == UI_THEME_DARK ? 0x111827FF : 0xE3EFF1FF,
+                  app.settings.theme == UI_THEME_DARK ? 0x0B0D12FF : 0xF4E5E0FF);
+    C2D_DrawRectSolid(0, 0, 0.2f, TOP_WIDTH, 4, CLR_ACCENT2);
+    draw_icon_radio(26, 38, 84, CLR_ACCENT);
+    draw_label(132, 45, 0.82f, CLR_TEXT, "%s", title);
+    if (subtitle)
+        draw_label(134, 76, 0.40f, CLR_TEXT_SEC, "%s", subtitle);
+    for (int i = 0; i < 10; i++) {
+        float h = 4.0f + (float)((i * 9) % 18);
+        C2D_DrawRectSolid(132 + i * 19, 143 - h, 0.3f,
+                          10, h, i == 5 ? CLR_ACCENT2 : CLR_ACCENT);
     }
+    draw_status_bar();
+}
+
+static const char *discover_label(void) {
+    return locale_get_language() == LANG_ZH_CN ? "发现" : "Discover";
+}
+
+static void draw_app_nav(void) {
+    /* The reference project treats the bottom screen as an application shell:
+     * brand at left, three stable destinations, and a thin active rail. */
+    select_bottom();
+    C2D_DrawRectSolid(0, 0, 0.1f, BOT_WIDTH, 29, CLR_SURFACE);
+    C2D_DrawRectSolid(0, 28, 0.2f, BOT_WIDTH, 1, CLR_SURFACE_LT);
+
+    draw_label(8, 6, 0.43f, CLR_TEXT, "3DSRadio");
+
+    const char *tabs[] = {tr_now_playing(), discover_label(),
+                          tr_settings_header()};
+    const int starts[] = {91, 164, 254};
+    const int widths[] = {68, 80, 62};
+    for (int i = 0; i < 3; i++) {
+        bool active = app.main_tab == i;
+        float text_width = (float)utf8_display_columns(tabs[i]) * 6.0f;
+        draw_label(starts[i] + (widths[i] - text_width) * 0.5f, 7,
+                   0.34f, active ? CLR_TEXT : CLR_TEXT_DIM, "%s", tabs[i]);
+        if (active)
+            C2D_DrawRectSolid(starts[i] + 5, 26, 0.3f,
+                              widths[i] - 10, 3, CLR_ACCENT2);
+    }
+}
+
+static void draw_footer_hints(const char *left, const char *right) {
+    select_bottom();
+    C2D_DrawRectSolid(0, BOT_HEIGHT - 25, 0.2f,
+                      BOT_WIDTH, 25, CLR_STATUSBAR);
+    if (skin.ready) {
+        ui_skin_draw_tinted(&skin, UI_SKIN_KEY_A, 9, BOT_HEIGHT - 20,
+                            0.4f, 14, 14, CLR_ACCENT);
+        ui_skin_draw_tinted(&skin, UI_SKIN_KEY_B, 27, BOT_HEIGHT - 20,
+                            0.4f, 14, 14, CLR_ACCENT2);
+    }
+    draw_label(47, BOT_HEIGHT - 19, 0.30f, CLR_TEXT_DIM, "%s", left);
+    if (right && right[0])
+        draw_label(190, BOT_HEIGHT - 19, 0.30f, CLR_TEXT_DIM, "%s", right);
+}
+
+static void draw_top_brand(void) {
+    select_top();
+    clear_top();
+    /* Quiet horizontal bands keep the screen legible while giving it the
+     * soft, illustrated atmosphere of the reference home screen. */
+    draw_gradient(0, 0, TOP_WIDTH, TOP_HEIGHT,
+                  app.settings.theme == UI_THEME_DARK ? 0x111827FF : 0xE7F1F3FF,
+                  app.settings.theme == UI_THEME_DARK ? 0x0B0D12FF : 0xF6E6E0FF);
+    for (int i = 0; i < 7; i++) {
+        float x = 26.0f + i * 58.0f;
+        float h = 10.0f + (float)((i * 13) % 28);
+        C2D_DrawRectSolid(x, 156.0f - h, 0.3f, 20.0f, h,
+                          i == 3 ? CLR_ACCENT2 : CLR_ACCENT);
+    }
+    draw_icon_radio(160, 30, 80, CLR_ACCENT);
+    draw_label(20, 156, 1.15f, CLR_TEXT, "3DSRadio");
+    draw_label(22, 186, 0.43f, CLR_TEXT_SEC, "%s", tr_main_subtitle());
+    draw_label(22, 207, 0.32f, CLR_TEXT_DIM, "radio-browser.info  ·  v1.1");
+}
+
+static void draw_current_station_hero(void) {
+    select_top();
+    clear_top();
+    draw_gradient(0, 0, TOP_WIDTH, TOP_HEIGHT,
+                  app.settings.theme == UI_THEME_DARK ? 0x0D1720FF : 0xE5F0F1FF,
+                  app.settings.theme == UI_THEME_DARK ? 0x12121AFF : 0xF6E2DFFF);
+    draw_icon_radio(28, 34, 74, CLR_ACCENT);
+    draw_label(122, 40, 0.35f, CLR_ACCENT2, "%s", tr_now_playing());
+    char station[96];
+    copy_utf8_ellipsis(station, sizeof(station), app.current_station->name, 30);
+    draw_label(122, 62, 0.88f, CLR_TEXT, "%s", station);
+    char details[120];
+    snprintf(details, sizeof(details), "%s  ·  %d kbps",
+             app.current_station->codec[0] ? app.current_station->codec : "STREAM",
+             app.current_station->bitrate);
+    draw_label(122, 91, 0.38f, CLR_TEXT_SEC, "%s", details);
+
+    StreamPlayerState state = app.stream_player
+        ? stream_player_get_state(app.stream_player) : STREAM_STATE_ERROR;
+    bool active = state == STREAM_STATE_PLAYING;
+    int bar_count = 28;
+    for (int i = 0; i < bar_count; i++) {
+        float phase = (float)(i * 7 + app.frame_count * 3);
+        float height = active ? 5.0f + (sinf(phase * 0.09f) + 1.0f) * 11.0f : 4.0f;
+        C2D_DrawRectSolid(22 + i * 13, 143 - height, 0.3f, 8, height,
+                          i % 5 == 0 ? CLR_ACCENT2 : CLR_ACCENT);
+    }
+    u32 state_color = active ? CLR_OK : CLR_WARN;
+    const char *state_text = active ? tr_playing() : tr_paused();
+    if (state == STREAM_STATE_BUFFERING) {
+        state_color = CLR_WARN;
+        state_text = tr_buffering();
+    } else if (state == STREAM_STATE_ERROR) {
+        state_color = CLR_ERR;
+        state_text = tr_stream_failed();
+    }
+    C2D_DrawCircleSolid(24, 184, 0.4f, 4, state_color);
+    draw_label(34, 178, 0.42f, state_color, "%s", state_text);
+    draw_label(245, 178, 0.35f, CLR_TEXT_DIM, "%s",
+               tr_volume_level((int)(app.volume * 100)));
+    draw_status_bar();
 }
 
 /* ======================================================================
  * Screen: Main Menu
  * ====================================================================== */
 
+static void render_settings(void);
+
 static void render_main_menu(void) {
-    select_top();
-    clear_top();
+    if (app.main_tab == 0 && app.current_station)
+        draw_current_station_hero();
+    else
+        draw_top_brand();
 
-    /* Hero area with gradient */
-    draw_gradient(0, 0, TOP_WIDTH, 120, 0xFFFFFF20, 0x00000000);
-
-    /* App logo area using panel skin */
-    draw_panel(TOP_WIDTH/2 - 50, 25, 100, 100);
-    draw_label(TOP_WIDTH/2 - 30, 55, 1.8f, CLR_ACCENT, "R");
-
-    /* Title */
-    draw_label(20, 140, 0.7f, CLR_TEXT_SEC, "%s", tr_main_subtitle());
-    draw_label(20, 162, 0.5f, CLR_TEXT_DIM, "%s", tr_about_powered());
-    draw_label(20, 185, 0.4f, CLR_TEXT_DIM, "%s", tr_about_desc());
-
-    /* Bottom screen: menu */
     select_bottom();
     clear_bottom();
+    draw_app_nav();
 
-    draw_label(15, 8, 0.55f, CLR_TEXT_SEC, "%s", tr_menu_header());
-
-    const char *items[] = {
-        tr_menu_browse_genre(), tr_menu_browse_language(),
-        tr_menu_top_stations(), tr_menu_search(), tr_menu_settings()
-    };
-    for (int i = 0; i < MAIN_MENU_COUNT; i++) {
-        int y = 28 + i * 36;
-        bool sel = (i == app.selection);
-
-        draw_button(10, y, BOT_WIDTH - 20, 34, sel);
-
-        draw_label(22, y + 7, 0.5f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", items[i]);
-        draw_label(BOT_WIDTH - 30, y + 7, 0.5f, CLR_TEXT_DIM, ">");
+    if (app.main_tab == 0) {
+        /* Now Playing is intentionally calm when no stream is active. */
+        draw_panel(12, 48, BOT_WIDTH - 24, 106);
+        draw_icon_play(32, 69, 36, CLR_ACCENT);
+        draw_label(82, 64, 0.55f, CLR_TEXT, "%s", tr_now_playing());
+        if (app.current_station) {
+            draw_label(82, 88, 0.42f, CLR_TEXT_SEC, "%s",
+                       app.current_station->name);
+            draw_label(82, 110, 0.32f, CLR_TEXT_DIM, "%s",
+                       tr_select_station());
+        } else {
+            draw_label(82, 91, 0.42f, CLR_TEXT_SEC, "%s",
+                       locale_get_language() == LANG_ZH_CN ?
+                       "还没有开始播放" : "Nothing is playing");
+            draw_label(82, 114, 0.32f, CLR_TEXT_DIM, "%s",
+                       locale_get_language() == LANG_ZH_CN ?
+                       "切换到发现，选择一个电台" :
+                       "Open Discover to choose a station");
+        }
+        draw_footer_hints("A 播放页", "← → 切换");
+        return;
     }
 
-    /* Buffer size hint */
-    draw_label(15, BOT_HEIGHT - 22, 0.32f, CLR_TEXT_DIM,
-               "SELECT " "\x1E" " " "%s", tr_buffer_size());
+    if (app.main_tab == 2) {
+        render_settings();
+        return;
+    }
 
-    draw_status_bar();
+    /* Discover dashboard: four clear destinations instead of five cramped
+     * text rows. The information hierarchy mirrors the reference app: one
+     * heading, two-up cards, one persistent footer. */
+    draw_label(14, 39, 0.36f, CLR_ACCENT, "%s", discover_label());
+    draw_label(14, 54, 0.30f, CLR_TEXT_DIM,
+               locale_get_language() == LANG_ZH_CN ?
+               "按风格、语言或热门电台探索" :
+               "Explore by mood, language or popularity");
+
+    const char *labels[] = {tr_menu_browse_genre(), tr_menu_browse_language(),
+                            tr_menu_top_stations(), tr_menu_search()};
+    const char *subtitles[] = {"GENRE", "LANGUAGE", "POPULAR", "FIND"};
+    for (int i = 0; i < 4; i++) {
+        int col = i & 1;
+        int row = i >> 1;
+        float x = 10.0f + col * 152.0f;
+        float y = 72.0f + row * 53.0f;
+        bool selected = app.selection == i;
+        draw_button(x, y, 144, 45, selected);
+        if (i == 0) draw_icon_list(x + 12, y + 9, 24, selected ? CLR_ACCENT : CLR_TEXT_SEC);
+        if (i == 1) draw_icon_globe(x + 12, y + 9, 24, selected ? CLR_ACCENT : CLR_TEXT_SEC);
+        if (i == 2) draw_icon_radio(x + 12, y + 9, 24, selected ? CLR_ACCENT : CLR_TEXT_SEC);
+        if (i == 3) draw_icon_search(x + 12, y + 9, 24, selected ? CLR_ACCENT : CLR_TEXT_SEC);
+        draw_label(x + 44, y + 8, 0.35f,
+                   selected ? CLR_TEXT : CLR_TEXT_SEC, "%s", subtitles[i]);
+        draw_label(x + 44, y + 24, 0.30f,
+                   selected ? CLR_ACCENT : CLR_TEXT_DIM, "%s", labels[i]);
+        draw_icon_chevron(x + 126, y + 16, 11,
+                          selected ? CLR_ACCENT2 : CLR_TEXT_DIM);
+    }
+    draw_footer_hints("A 打开", "L/R 切换页签");
 }
 
 /* ======================================================================
@@ -564,9 +815,12 @@ static void render_main_menu(void) {
  * ====================================================================== */
 
 static void draw_empty_list_state(void) {
-    draw_panel(12, 68, BOT_WIDTH - 24, 58);
-    draw_label(24, 82, 0.52f, CLR_WARN, "%s", tr_no_stations());
-    draw_label(24, 105, 0.38f, CLR_TEXT_DIM, "%s", tr_back());
+    draw_panel(12, 82, BOT_WIDTH - 24, 64);
+    draw_icon_search(26, 97, 24, CLR_WARN);
+    draw_label(62, 96, 0.42f, CLR_WARN, "%s", tr_no_stations());
+    draw_label(62, 118, 0.30f, CLR_TEXT_DIM,
+               locale_get_language() == LANG_ZH_CN ?
+               "请返回并换一个筛选条件" : "Go back and try another filter");
 }
 
 static void render_tag_list(void) {
@@ -574,8 +828,9 @@ static void render_tag_list(void) {
 
     select_bottom();
     clear_bottom();
+    draw_app_nav();
 
-    draw_label(15, 8, 0.55f, CLR_TEXT_DIM, "%s", tr_genres_available(app.tag_count));
+    draw_label(15, 37, 0.36f, CLR_ACCENT, "%s", tr_genres_available(app.tag_count));
 
     if (app.tag_count <= 0) {
         draw_empty_list_state();
@@ -589,7 +844,7 @@ static void render_tag_list(void) {
 
     for (int i = start; i < end; i++) {
         int idx = i - start;
-        int y = 28 + idx * 24;
+        int y = 56 + idx * 23;
         bool sel = (i == app.selection);
 
         if (sel) {
@@ -601,16 +856,12 @@ static void render_tag_list(void) {
         char count_str[16];
         snprintf(count_str, sizeof(count_str), "%d", app.tags[i].stationcount);
 
-        draw_label(15, y, 0.5f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", label);
+        draw_icon_list(9, y - 1, 15, sel ? CLR_ACCENT : CLR_TEXT_DIM);
+        draw_label(30, y, 0.44f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", label);
         draw_label(BOT_WIDTH - 50, y, 0.4f, CLR_TEXT_DIM, "%s", count_str);
     }
 
-    /* Hint bar using footer skin */
-    draw_panel(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18);
-    draw_label(12, BOT_HEIGHT - 20, 0.4f, CLR_TEXT_DIM,
-               "%s", tr_nav_hint_genres());
-
-    draw_status_bar();
+    draw_footer_hints("A 打开", "B 返回");
 }
 
 /* ======================================================================
@@ -622,8 +873,9 @@ static void render_language_list(void) {
 
     select_bottom();
     clear_bottom();
+    draw_app_nav();
 
-    draw_label(15, 8, 0.55f, CLR_TEXT_DIM, "%s", tr_languages_available(app.language_count));
+    draw_label(15, 37, 0.36f, CLR_ACCENT, "%s", tr_languages_available(app.language_count));
 
     if (app.language_count <= 0) {
         draw_empty_list_state();
@@ -637,7 +889,7 @@ static void render_language_list(void) {
 
     for (int i = start; i < end; i++) {
         int idx = i - start;
-        int y = 28 + idx * 24;
+        int y = 56 + idx * 23;
         bool sel = (i == app.selection);
 
         if (sel) {
@@ -649,16 +901,12 @@ static void render_language_list(void) {
         char count_str[16];
         snprintf(count_str, sizeof(count_str), "%d", app.languages[i].stationcount);
 
-        draw_label(15, y, 0.5f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", label);
+        draw_icon_globe(9, y - 1, 15, sel ? CLR_ACCENT : CLR_TEXT_DIM);
+        draw_label(30, y, 0.44f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", label);
         draw_label(BOT_WIDTH - 50, y, 0.4f, CLR_TEXT_DIM, "%s", count_str);
     }
 
-    /* Hint bar */
-    draw_panel(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18);
-    draw_label(12, BOT_HEIGHT - 20, 0.4f, CLR_TEXT_DIM,
-               "%s", tr_nav_hint_languages());
-
-    draw_status_bar();
+    draw_footer_hints("A 打开", "B 返回");
 }
 
 /* ======================================================================
@@ -670,6 +918,7 @@ static void render_station_list(void) {
 
     select_bottom();
     clear_bottom();
+    draw_app_nav();
 
     if (app.station_count <= 0) {
         draw_empty_list_state();
@@ -683,7 +932,7 @@ static void render_station_list(void) {
 
     for (int i = start; i < end; i++) {
         int idx = i - start;
-        int y = 5 + idx * 26;
+        int y = 37 + idx * 25;
         bool sel = (i == app.selection);
 
         if (sel) {
@@ -695,7 +944,8 @@ static void render_station_list(void) {
         /* Station name — keep it clear of the bitrate badge on the right */
         char name_buf[64];
         copy_utf8_ellipsis(name_buf, sizeof(name_buf), s->name, 24);
-        draw_label(12, y + 2, 0.5f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", name_buf);
+        draw_icon_radio(7, y + 1, 17, sel ? CLR_ACCENT : CLR_TEXT_DIM);
+        draw_label(30, y + 2, 0.42f, sel ? CLR_TEXT : CLR_TEXT_SEC, "%s", name_buf);
 
         /* Codec + bitrate badge.  Unsupported formats remain visible but are
          * clearly marked so A never leads to a silent playback screen. */
@@ -711,11 +961,7 @@ static void render_station_list(void) {
         }
     }
 
-    draw_panel(5, BOT_HEIGHT - 22, BOT_WIDTH - 10, 18);
-    draw_label(12, BOT_HEIGHT - 20, 0.35f, CLR_TEXT_DIM,
-               "%s", tr_nav_hint_stations());
-
-    draw_status_bar();
+    draw_footer_hints("A 播放", "Y 详情  ·  B 返回");
 }
 
 /* ======================================================================
@@ -850,25 +1096,33 @@ static void render_playing(void) {
     /* Bottom screen: controls */
     select_bottom();
     clear_bottom();
+    C2D_DrawRectSolid(0, 0, 0.1f, BOT_WIDTH, 4, CLR_ACCENT2);
+    draw_label(14, 12, 0.34f, CLR_ACCENT, "%s", tr_controls());
+    draw_panel(10, 31, BOT_WIDTH - 20, 32);
+    draw_icon_radio(18, 37, 22, CLR_ACCENT);
+    char mini_name[64];
+    copy_utf8_ellipsis(mini_name, sizeof(mini_name),
+                       app.current_station->name, 25);
+    draw_label(50, 37, 0.40f, CLR_TEXT, "%s", mini_name);
+    draw_label(50, 51, 0.28f, CLR_TEXT_DIM, "%s", state_label);
 
-    draw_label(15, 12, 0.55f, CLR_TEXT_SEC, "%s", tr_controls());
-
-    /* Control buttons as skin-based buttons */
-    struct { const char *label; const char *key; u32 color; } controls[] = {
-        {tr_play_pause(), "A", CLR_ACCENT},
-        {tr_stop_back(), "B", CLR_ACCENT3},
-        {tr_vol_down(), "X", CLR_TEXT_DIM},
-        {tr_vol_up(), "Y", CLR_ACCENT2},
+    struct { const char *label; u32 color; } controls[] = {
+        {tr_play_pause(), CLR_ACCENT}, {tr_stop_back(), CLR_ACCENT2},
+        {tr_vol_down(), CLR_TEXT_SEC}, {tr_vol_up(), CLR_ACCENT2},
     };
-
     for (int i = 0; i < 4; i++) {
         int x = 8 + i * 78;
-        int y = 45;
-        draw_button(x, y, 72, 55,
-                    i == 0 && (player_state == STREAM_STATE_PLAYING ||
-                               player_state == STREAM_STATE_PAUSED));
-        draw_label(x + 10, y + 17, 0.6f, controls[i].color, "%s", controls[i].key);
-        draw_label(x + 10, y + 38, 0.45f, CLR_TEXT_DIM, "%s", controls[i].label);
+        int y = 72;
+        bool selected = i == 0 && (player_state == STREAM_STATE_PLAYING ||
+                                   player_state == STREAM_STATE_PAUSED);
+        draw_button(x, y, 72, 52, selected);
+        if (i == 0) {
+            if (player_state == STREAM_STATE_PLAYING) draw_icon_pause(x + 25, y + 7, 23, controls[i].color);
+            else draw_icon_play(x + 25, y + 7, 23, controls[i].color);
+        } else if (i == 1) draw_icon_stop(x + 25, y + 7, 23, controls[i].color);
+        else if (i == 2) draw_icon_volume(x + 24, y + 7, 24, controls[i].color);
+        else draw_icon_volume(x + 24, y + 7, 24, controls[i].color);
+        draw_label(x + 8, y + 34, 0.28f, controls[i].color, "%s", controls[i].label);
     }
 
     /* Diagnostic panel is useful when a stream is weak or unsupported, but
@@ -878,23 +1132,23 @@ static void render_playing(void) {
     if (stream_player_get_codec(app.stream_player) == STREAM_CODEC_UNKNOWN &&
         app.current_station->codec[0])
         codec_name = app.current_station->codec;
-    draw_panel(8, 118, BOT_WIDTH - 16, 42);
-    draw_label(15, 126, 0.38f, CLR_TEXT_DIM, "%s: %s", tr_codec(), codec_name);
-    draw_label(15, 140, 0.38f, state_color, "%s", state_label);
+    draw_panel(8, 132, BOT_WIDTH - 16, 49);
+    draw_label(15, 140, 0.32f, CLR_TEXT_DIM, "%s: %s", tr_codec(), codec_name);
+    draw_label(15, 154, 0.32f, state_color, "%s", state_label);
     if (player_state == STREAM_STATE_PLAYING ||
         player_state == STREAM_STATE_PAUSED) {
-        draw_label(180, 140, 0.34f, CLR_TEXT_DIM, "%d Hz / %s",
+        draw_label(180, 140, 0.30f, CLR_TEXT_DIM, "%d Hz / %s",
                    stream_player_get_sample_rate(app.stream_player),
                    stream_player_get_channels(app.stream_player) == 1 ? "mono" : "stereo");
     }
     if (player_state == STREAM_STATE_BUFFERING ||
         player_state == STREAM_STATE_RECONNECTING)
-        draw_label(180, 140, 0.36f, CLR_TEXT_DIM, "%d%%",
+        draw_label(180, 154, 0.32f, CLR_TEXT_DIM, "%d%%",
                    stream_player_get_buffer_percent(app.stream_player));
     if (player_state == STREAM_STATE_ERROR)
-        draw_label(15, 153, 0.30f, CLR_ERR, "%s", tr_retry());
+        draw_label(180, 154, 0.30f, CLR_ERR, "%s", tr_retry());
 
-    draw_status_bar();
+    draw_footer_hints("A 播放/暂停", "B 返回  ·  X/Y 音量");
 }
 
 /* ======================================================================
@@ -946,25 +1200,26 @@ static void render_search(void) {
 
     select_bottom();
     clear_bottom();
+    draw_app_nav();
 
-    draw_panel(8, 3, BOT_WIDTH - 16, 27);
-    draw_label(16, 9, 0.43f, CLR_ACCENT, "%s",
+    draw_panel(8, 34, BOT_WIDTH - 16, 25);
+    draw_label(16, 40, 0.38f, CLR_ACCENT, "%s",
                search_input_query(&app.search_input));
     if (search_input_composition(&app.search_input)[0])
         draw_label(16 + (float)utf8_display_columns(
                    search_input_query(&app.search_input)) * 7.0f,
-                   9, 0.40f, CLR_ACCENT2, "%s",
+                   40, 0.36f, CLR_ACCENT2, "%s",
                    search_input_composition(&app.search_input));
     if (!search_input_query(&app.search_input)[0] &&
         !search_input_composition(&app.search_input)[0])
-        draw_label(16, 9, 0.40f, CLR_TEXT_DIM, "%s", tr_search_hint());
+        draw_label(16, 40, 0.34f, CLR_TEXT_DIM, "%s", tr_search_hint());
 
     if (app.search_query[0] && app.station_count == 0) {
-        draw_label(16, 62, 0.30f, CLR_WARN, "%s  %s",
+        draw_label(16, 63, 0.28f, CLR_WARN, "%s  %s",
                    tr_no_stations(), tr_search_action());
     }
 
-    draw_panel(8, 35, BOT_WIDTH - 16, 27);
+    draw_panel(8, 63, BOT_WIDTH - 16, 24);
     int candidate_count = search_input_candidate_count(&app.search_input);
     int page_count = (candidate_count + SEARCH_CANDIDATES_PER_PAGE - 1) /
                      SEARCH_CANDIDATES_PER_PAGE;
@@ -984,14 +1239,14 @@ static void render_search(void) {
         if (candidate_x + width > BOT_WIDTH - 8.0f) break;
         bool selected = i == app.search_candidate_cursor;
         if (selected && app.search_candidate_focus)
-            draw_selection(candidate_x, 38, width - 2.0f, 21);
-        draw_label(candidate_x + 7.0f, 42, 0.36f,
+            draw_selection(candidate_x, 65, width - 2.0f, 19);
+        draw_label(candidate_x + 7.0f, 69, 0.32f,
                    selected ? CLR_ACCENT : CLR_TEXT_SEC, "%s", candidate_text);
         candidate_x += width + 3.0f;
     }
 
     if (candidate_count > 0)
-        draw_label(274, 43, 0.28f, CLR_TEXT_DIM, "%d/%d",
+        draw_label(274, 69, 0.26f, CLR_TEXT_DIM, "%d/%d",
                    app.search_candidate_page + 1, page_count);
 
     int cursor = 0;
@@ -1002,7 +1257,7 @@ static void render_search(void) {
         float start_x = row == 0 ? 4.0f : (row == 1 ? 19.0f : 50.0f);
         for (int col = 0; col < key_count; col++, cursor++) {
             int x = (int)(start_x + col * key_w);
-            int y = 68 + row * 34;
+            int y = 91 + row * 27;
             bool selected = !app.search_candidate_focus && cursor == app.search_cursor;
             draw_button((float)x, (float)y, key_w - 2, 29, selected);
             draw_label((float)x + 8, (float)y + 7, 0.38f,
@@ -1019,12 +1274,12 @@ static void render_search(void) {
     for (int i = 0; i < SEARCH_ACTION_COUNT; i++) {
         bool selected = !app.search_candidate_focus &&
                         app.search_cursor == action_base + i;
-        draw_button((float)action_x[i], 172, (float)action_w[i], 35, selected);
-        draw_label((float)action_x[i] + 8, 182, 0.34f,
+        draw_button((float)action_x[i], 174, (float)action_w[i], 34, selected);
+        draw_label((float)action_x[i] + 8, 184, 0.30f,
                    selected ? CLR_ACCENT : action_colors[i], "%s", actions[i]);
     }
 
-    draw_status_bar();
+    draw_footer_hints("A 输入", "B 退格  ·  Y 符号");
 }
 
 /* ======================================================================
@@ -1039,69 +1294,57 @@ static void render_station_info(void) {
 
     RadioStation *s = &app.stations[app.selection];
 
-    select_top();
-    clear_top();
-
-    draw_label(20, 20, 0.8f, CLR_TEXT, "%s", tr_station_info());
+    char station_name[100];
+    copy_utf8_ellipsis(station_name, sizeof(station_name), s->name, 30);
+    draw_hero_header(tr_station_info(), station_name);
 
     /* Info card using panel skin */
-    draw_panel(10, 50, TOP_WIDTH - 20, 160);
+    select_top();
+    draw_panel(10, 106, TOP_WIDTH - 20, 96);
 
-    int y = 60;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_name());
-    char station_name[100];
-    copy_utf8_ellipsis(station_name, sizeof(station_name), s->name, 26);
-    draw_label(120, y, 0.45f, CLR_TEXT, "%s", station_name);
-
-    y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_country());
+    int y = 115;
+    draw_label(20, y, 0.36f, CLR_TEXT_SEC, "%s", tr_country());
     char country[64];
     copy_utf8_ellipsis(country, sizeof(country),
-                       s->country[0] ? s->country : tr_na(), 18);
-    draw_label(120, y, 0.45f, CLR_TEXT, "%s", country);
+                       s->country[0] ? s->country : tr_na(), 22);
+    draw_label(112, y, 0.36f, CLR_TEXT, "%s", country);
 
     y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_codec());
-    draw_label(120, y, 0.45f, CLR_TEXT, "%s", s->codec[0] ? s->codec : tr_na());
+    draw_label(20, y, 0.36f, CLR_TEXT_SEC, "%s", tr_codec());
+    draw_label(112, y, 0.36f, CLR_ACCENT, "%s", s->codec[0] ? s->codec : tr_na());
 
     y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_bitrate());
-    draw_label(120, y, 0.45f, CLR_TEXT, "%d kbps", s->bitrate);
+    draw_label(20, y, 0.36f, CLR_TEXT_SEC, "%s", tr_bitrate());
+    draw_label(112, y, 0.36f, CLR_TEXT, "%d kbps", s->bitrate);
 
     y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_language());
+    draw_label(20, y, 0.36f, CLR_TEXT_SEC, "%s", tr_language());
     char language[64];
     copy_utf8_ellipsis(language, sizeof(language),
-                       s->language[0] ? s->language : tr_na(), 18);
-    draw_label(120, y, 0.45f, CLR_TEXT, "%s", language);
-
-    y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_votes());
-    draw_label(120, y, 0.45f, CLR_TEXT, "%d", s->votes);
-
-    y += 20;
-    draw_label(20, y, 0.45f, CLR_TEXT_SEC, "%s", tr_clicks());
-    draw_label(120, y, 0.45f, CLR_TEXT, "%d", s->clickcount);
+                       s->language[0] ? s->language : tr_na(), 22);
+    draw_label(112, y, 0.36f, CLR_TEXT, "%s", language);
 
     select_bottom();
     clear_bottom();
-
-    draw_label(15, 12, 0.5f, CLR_TEXT_SEC, "%s", tr_station_details());
+    draw_app_nav();
+    draw_label(14, 38, 0.36f, CLR_ACCENT, "%s", tr_station_details());
 
     /* Tags section */
     if (strlen(s->tags) > 0) {
-        draw_panel(8, 40, BOT_WIDTH - 16, 50);
-        draw_label(15, 46, 0.35f, CLR_TEXT_DIM, "%s", tr_tags());
+        draw_panel(8, 52, BOT_WIDTH - 16, 50);
+        draw_label(15, 58, 0.35f, CLR_TEXT_DIM, "%s", tr_tags());
             char tags_buf[120];
             copy_utf8_ellipsis(tags_buf, sizeof(tags_buf), s->tags, 42);
-            draw_label(15, 60, 0.4f, CLR_ACCENT, "%s", tags_buf);
+            draw_label(15, 72, 0.36f, CLR_ACCENT, "%s", tags_buf);
     }
 
-    /* Back button */
-    draw_panel(8, BOT_HEIGHT - 40, BOT_WIDTH - 16, 32);
-    draw_label(15, BOT_HEIGHT - 35, 0.4f, CLR_TEXT_DIM, "%s", tr_back());
+    draw_panel(8, 112, BOT_WIDTH - 16, 42);
+    draw_label(15, 120, 0.32f, CLR_TEXT_DIM, "%s", tr_votes_clicks(s->votes, s->clickcount));
+    draw_label(15, 136, 0.30f, CLR_TEXT_DIM, "%s",
+               locale_get_language() == LANG_ZH_CN ?
+               "A 播放此电台" : "A play this station");
 
-    draw_status_bar();
+    draw_footer_hints("A 播放", "B 返回");
 }
 
 static const char *settings_theme_label(void) {
@@ -1121,7 +1364,8 @@ static void render_settings(void) {
 
     select_bottom();
     clear_bottom();
-    draw_label(15, 8, 0.55f, CLR_TEXT_SEC, "%s", tr_settings_header());
+    draw_app_nav();
+    draw_label(14, 38, 0.36f, CLR_ACCENT, "%s", tr_settings_header());
 
     const char *labels[] = {tr_theme(), tr_buffer_size(), tr_language(), tr_about_title()};
     const char *values[] = {
@@ -1133,19 +1377,21 @@ static void render_settings(void) {
     };
 
     for (int i = 0; i < 4; i++) {
-        int y = 28 + i * 36;
+        int y = 54 + i * 36;
         bool selected = app.selection == i;
-        draw_button(10, y, BOT_WIDTH - 20, 32, selected);
-        draw_label(22, y + 6, 0.48f, selected ? CLR_TEXT : CLR_TEXT_SEC,
+        draw_button(10, y, BOT_WIDTH - 20, 31, selected);
+        if (i == 0) draw_icon_gear(20, y + 5, 20, selected ? CLR_ACCENT : CLR_TEXT_DIM);
+        if (i == 1) draw_icon_volume(20, y + 5, 20, selected ? CLR_ACCENT : CLR_TEXT_DIM);
+        if (i == 2) draw_icon_globe(20, y + 5, 20, selected ? CLR_ACCENT : CLR_TEXT_DIM);
+        if (i == 3) draw_icon_radio(20, y + 5, 20, selected ? CLR_ACCENT : CLR_TEXT_DIM);
+        draw_label(49, y + 6, 0.42f, selected ? CLR_TEXT : CLR_TEXT_SEC,
                    "%s", labels[i]);
-        draw_label(BOT_WIDTH - 118, y + 6, 0.40f, selected ? CLR_ACCENT : CLR_TEXT_DIM,
+        draw_label(BOT_WIDTH - 126, y + 6, 0.36f, selected ? CLR_ACCENT : CLR_TEXT_DIM,
                    "%s", values[i]);
+        draw_icon_chevron(BOT_WIDTH - 22, y + 10, 9,
+                          selected ? CLR_ACCENT2 : CLR_TEXT_DIM);
     }
-
-    draw_panel(10, 180, BOT_WIDTH - 20, 36);
-    draw_label(20, 188, 0.36f, CLR_TEXT_DIM, "%s", tr_about_desc());
-    draw_label(20, 202, 0.36f, CLR_TEXT_DIM, "%s", tr_back());
-    draw_status_bar();
+    draw_footer_hints("← → 修改", "B 返回");
 }
 
 /* ======================================================================
@@ -1177,90 +1423,77 @@ static void handle_input(void) {
 
     switch (app.screen) {
         case SCREEN_MAIN_MENU: {
-            if (kDown & KEY_DOWN)
-                app.selection = (app.selection + 1) % MAIN_MENU_COUNT;
-            if (kDown & KEY_UP)
-                app.selection = (app.selection - 1 + MAIN_MENU_COUNT) % MAIN_MENU_COUNT;
+            bool activate = (kDown & KEY_A) != 0;
+            if (kDown & KEY_LEFT)
+                app.main_tab = (app.main_tab + 2) % 3;
+            if (kDown & KEY_RIGHT)
+                app.main_tab = (app.main_tab + 1) % 3;
 
-            if (touch_active && touch.py >= 28 && touch.py <= 28 + MAIN_MENU_COUNT * 36) {
-                int idx = (touch.py - 28) / 36;
-                if (idx >= 0 && idx < MAIN_MENU_COUNT) {
-                    app.selection = idx;
-                    if (touch.px >= 10 && touch.px <= BOT_WIDTH - 10) {
-                        kDown |= KEY_A;
+            if (touch_active && touch.py < 31) {
+                if (touch.px >= 88 && touch.px < 164) app.main_tab = 0;
+                else if (touch.px >= 164 && touch.px < 249) app.main_tab = 1;
+                else if (touch.px >= 249) app.main_tab = 2;
+                app.selection = 0;
+                if (app.main_tab == 2) {
+                    app.screen = SCREEN_SETTINGS;
+                    app.selection = 0;
+                }
+            }
+
+            if (app.main_tab == 1) {
+                if (kDown & KEY_DOWN) app.selection = (app.selection + 1) % 4;
+                if (kDown & KEY_UP) app.selection = (app.selection + 3) % 4;
+                if (touch_active && touch.py >= 68 && touch.py < 180) {
+                    int col = touch.px >= 160 ? 1 : 0;
+                    int row = touch.py >= 125 ? 1 : 0;
+                    app.selection = row * 2 + col;
+                    activate = true;
+                }
+                if (activate) {
+                    switch (app.selection) {
+                        case 0:
+                            if (app.tags_loaded) {
+                                app.selection = 0;
+                                app.scroll_offset = 0;
+                                app.screen = SCREEN_TAG_LIST;
+                            } else async_launch_load(ASYNC_REQ_LOAD_TAGS, "");
+                            break;
+                        case 1:
+                            if (app.languages_loaded) {
+                                app.selection = 0;
+                                app.scroll_offset = 0;
+                                app.screen = SCREEN_LANGUAGE_LIST;
+                            } else async_launch_load(ASYNC_REQ_LOAD_LANGUAGES, "");
+                            break;
+                        case 2:
+                            app.station_list_parent = SCREEN_MAIN_MENU;
+                            if (app.top_loaded) {
+                                memcpy(app.stations, app.top_stations,
+                                       (size_t)app.top_count * sizeof(app.stations[0]));
+                                app.station_count = app.top_count;
+                                app.selection = 0;
+                                app.scroll_offset = 0;
+                                app.screen = SCREEN_STATION_LIST;
+                            } else async_launch_load(ASYNC_REQ_LOAD_TOP_STATIONS, "");
+                            break;
+                        case 3:
+                            search_input_destroy(&app.search_input);
+                            search_input_init(&app.search_input);
+                            app.search_query[0] = '\0';
+                            app.search_cursor = 0;
+                            app.search_candidate_cursor = 0;
+                            app.search_candidate_page = 0;
+                            app.search_candidate_focus = false;
+                            app.search_symbols = false;
+                            app.screen = SCREEN_SEARCH;
+                            break;
                     }
                 }
-            }
-
-            /* SELECT cycles audio buffer size (Small → Medium → Large) */
-            if (kDown & KEY_SELECT) {
-                app.buffer_size = (app.buffer_size + 1) % 3;
-                app.settings.buffer_size = app.buffer_size;
-                settings_save(&app.settings);
-                const char *size_names[] = {
-                    tr_buffer_small(), tr_buffer_medium(), tr_buffer_large()
-                };
-                set_status("%s", CLR_INFO, tr_buffer_changed(size_names[app.buffer_size]));
-                /* Recreate stream player with new buffer config */
-                if (app.stream_player) {
-                    stream_player_destroy(app.stream_player);
-                }
-                app.stream_player = stream_player_create_with_bufsize(app.buffer_size);
-                if (app.stream_player)
-                    stream_player_set_volume(app.stream_player, app.volume);
-                else
-                    set_status("%s", CLR_ERR, tr_audio_init_failed());
-            }
-
-            if (kDown & KEY_A) {
-                switch (app.selection) {
-                    case 0:
-                        if (app.tags_loaded) {
-                            app.selection = 0;
-                            app.scroll_offset = 0;
-                            app.screen = SCREEN_TAG_LIST;
-                        } else {
-                            async_launch_load(ASYNC_REQ_LOAD_TAGS, "");
-                        }
-                        break;
-                    case 1:
-                        if (app.languages_loaded) {
-                            app.selection = 0;
-                            app.scroll_offset = 0;
-                            app.screen = SCREEN_LANGUAGE_LIST;
-                        } else {
-                            async_launch_load(ASYNC_REQ_LOAD_LANGUAGES, "");
-                        }
-                        break;
-                    case 2:
-                        app.station_list_parent = SCREEN_MAIN_MENU;
-                        if (app.top_loaded) {
-                            memcpy(app.stations, app.top_stations,
-                                   (size_t)app.top_count * sizeof(app.stations[0]));
-                            app.station_count = app.top_count;
-                            app.selection = 0;
-                            app.scroll_offset = 0;
-                            app.screen = SCREEN_STATION_LIST;
-                        } else {
-                            async_launch_load(ASYNC_REQ_LOAD_TOP_STATIONS, "");
-                        }
-                        break;
-                    case 3:
-                        memset(app.search_query, 0, sizeof(app.search_query));
-                        app.search_cursor = 0;
-                        app.search_candidate_cursor = 0;
-                        app.search_candidate_page = 0;
-                        app.search_candidate_focus = false;
-                        app.search_symbols = false;
-                        search_input_destroy(&app.search_input);
-                        search_input_init(&app.search_input);
-                        app.screen = SCREEN_SEARCH;
-                        break;
-                    case 4:
-                        app.screen = SCREEN_SETTINGS;
-                        app.selection = 0;
-                        break;
-                }
+            } else if (app.main_tab == 0 && activate && app.current_station) {
+                app.screen = SCREEN_PLAYING;
+            } else if (app.main_tab == 2 && activate) {
+                app.screen = SCREEN_SETTINGS;
+                app.selection = 0;
             }
             break;
         }
@@ -1280,8 +1513,8 @@ static void handle_input(void) {
                         app.scroll_offset--;
                 }
             }
-            if (touch_active && touch.py >= 28) {
-                int idx = (touch.py - 28) / 24 + app.scroll_offset;
+            if (touch_active && touch.py >= 48 && touch.py < 215) {
+                int idx = (touch.py - 48) / 23 + app.scroll_offset;
                 if (idx >= 0 && idx < app.tag_count) {
                     app.selection = idx;
                     if (touch.px >= 5 && touch.px <= BOT_WIDTH - 5)
@@ -1315,8 +1548,8 @@ static void handle_input(void) {
                         app.scroll_offset--;
                 }
             }
-            if (touch_active && touch.py >= 28) {
-                int idx = (touch.py - 28) / 24 + app.scroll_offset;
+            if (touch_active && touch.py >= 48 && touch.py < 215) {
+                int idx = (touch.py - 48) / 23 + app.scroll_offset;
                 if (idx >= 0 && idx < app.language_count) {
                     app.selection = idx;
                     if (touch.px >= 5 && touch.px <= BOT_WIDTH - 5)
@@ -1350,8 +1583,8 @@ static void handle_input(void) {
                         app.scroll_offset--;
                 }
             }
-            if (touch_active && touch.py >= 5) {
-                int idx = (touch.py - 5) / 26 + app.scroll_offset;
+            if (touch_active && touch.py >= 32 && touch.py < 215) {
+                int idx = (touch.py - 32) / 25 + app.scroll_offset;
                 if (idx >= 0 && idx < app.station_count) {
                     app.selection = idx;
                     if (touch.px >= 3 && touch.px <= BOT_WIDTH - 3)
@@ -1418,7 +1651,7 @@ static void handle_input(void) {
                     stream_player_set_volume(app.stream_player, app.volume);
                 set_status("%s", CLR_INFO, tr_volume_level((int)(app.volume * 100)));
             }
-            if (touch_active && touch.py >= 45 && touch.py <= 100) {
+            if (touch_active && touch.py >= 70 && touch.py <= 126) {
                 int idx = (touch.px - 8) / 78;
                 if (idx >= 0 && idx < 4) {
                     switch (idx) {
@@ -1452,7 +1685,7 @@ static void handle_input(void) {
                     }
                 }
             }
-            if (touch_active && touch.py >= 118 && touch.py <= 160 &&
+            if (touch_active && touch.py >= 132 && touch.py <= 182 &&
                 (stream_player_get_state(app.stream_player) == STREAM_STATE_ERROR ||
                  stream_player_get_state(app.stream_player) == STREAM_STATE_ENDED)) {
                 if (stream_player_retry(app.stream_player) == 0)
@@ -1540,7 +1773,7 @@ static void handle_input(void) {
             }
 
             if (touch_active) {
-                if (touch.py >= 35 && touch.py < 62 && candidate_count > 0) {
+                if (touch.py >= 63 && touch.py < 88 && candidate_count > 0) {
                     float x = 12.0f;
                     for (int candidate = app.search_candidate_page *
                          SEARCH_CANDIDATES_PER_PAGE;
@@ -1563,10 +1796,10 @@ static void handle_input(void) {
                         }
                         x += width + 3.0f;
                     }
-                } else if (touch.py >= 68 && touch.py < 165) {
-                    int row = (touch.py - 68) / 34;
+                } else if (touch.py >= 91 && touch.py < 169) {
+                    int row = (touch.py - 91) / 27;
                     if (row >= 0 && row < SEARCH_KEY_ROW_COUNT) {
-                        int y = 68 + row * 34;
+                        int y = 91 + row * 27;
                         int count = (int)strlen(search_key_row(row));
                         float key_w = 29.0f;
                         float start_x = row == 0 ? 4.0f : (row == 1 ? 19.0f : 50.0f);
@@ -1580,7 +1813,7 @@ static void handle_input(void) {
                             activate = true;
                         }
                     }
-                } else if (touch.py >= 172 && touch.py < 207) {
+                } else if (touch.py >= 174 && touch.py < 210) {
                     const int action_x[] = {4, 76, 124, 192, 248};
                     const int action_w[] = {68, 44, 64, 52, 68};
                     for (int action = 0; action < SEARCH_ACTION_COUNT; action++) {
@@ -1663,8 +1896,8 @@ static void handle_input(void) {
             if (kDown & KEY_RIGHT) direction = 1;
             if (kDown & KEY_A && app.selection < 3) direction = 1;
 
-            if (touch_active && touch.py >= 28 && touch.py < 172) {
-                int idx = (touch.py - 28) / 36;
+            if (touch_active && touch.py >= 48 && touch.py < 205) {
+                int idx = (touch.py - 48) / 36;
                 if (idx >= 0 && idx < 4) {
                     app.selection = idx;
                     if (touch.px >= 10 && touch.px <= BOT_WIDTH - 10 && idx < 3)
@@ -1703,12 +1936,22 @@ static void handle_input(void) {
             if (kDown & KEY_B) {
                 settings_save(&app.settings);
                 app.screen = SCREEN_MAIN_MENU;
-                app.selection = 4;
+                app.main_tab = 1;
+                app.selection = 0;
             }
             break;
         }
 
         case SCREEN_STATION_INFO: {
+            if (touch_active && touch.py >= 110 && touch.py < 158)
+                kDown |= KEY_A;
+            if (kDown & KEY_A) {
+                if (!stream_player_codec_supported(app.stations[app.selection].codec))
+                    set_status("%s", CLR_WARN, tr_codec_unsupported());
+                else
+                    async_launch_load(ASYNC_REQ_PLAY_STATION,
+                                      app.stations[app.selection].stationuuid);
+            }
             if (kDown & KEY_B) {
                 app.screen = SCREEN_STATION_LIST;
             }
@@ -2117,6 +2360,7 @@ int main(void) {
 
     /* App state */
     app.screen = SCREEN_MAIN_MENU;
+    app.main_tab = 1; /* open on Discover, matching the reference shell */
     app.volume = 0.8f;
     app.buffer_size = (StreamBufSize)app.settings.buffer_size;
 

@@ -55,16 +55,28 @@ jobs:
           with open('romfs/banner.png', 'wb') as f:
               f.write(make_png(256, 128, bpix))
 
-          # Icon (solid blue circle on black)
+          # Icon: a small radio mark matching the in-app brand.  Avoid a
+          # placeholder letter/circle so the Home Menu icon is recognisable.
           ipix = []
           for y in range(48):
               row = []
               for x in range(48):
                   dx, dy = x - 24, y - 24
-                  if dx*dx + dy*dy < 484:
-                      row.append((92, 158, 255))
+                  d2 = dx*dx + dy*dy
+                  if d2 < 20*20:
+                      row.append((14, 21, 30))
+                  elif d2 < 22*22:
+                      row.append((89, 208, 216))
                   else:
-                      row.append((0, 0, 0))
+                      row.append((8, 10, 15))
+              # Radio dial, antenna bars, and coral play marker.
+              for bx, bh in [(15, 8), (19, 13), (23, 18)]:
+                  for by in range(28 - bh, 28):
+                      if 0 <= by < 48:
+                          row[bx] = (89, 208, 216)
+              for px in range(20, 29):
+                  if abs(y - 24) <= (px - 20) * 2:
+                      row[px] = (235, 91, 117)
               ipix.append(row)
           with open('romfs/icon.png', 'wb') as f:
               f.write(make_png(48, 48, ipix))
