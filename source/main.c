@@ -260,6 +260,8 @@ static bool load_theme(UiTheme theme) {
 /* Pre-allocated text buffer for efficiency */
 static C2D_TextBuf global_text_buf = NULL;
 static C2D_Font active_font = NULL;
+static bool font_metrics_known = false;
+static bool compact_font_metrics = false;
 
 /* Corner radius helpers matching ClouDS-Music-FA aero style */
 static float aero_corner(float h) {
@@ -367,11 +369,47 @@ static void draw_gradient(float x, float y, float w, float h,
     }
 }
 
+static void detect_font_metrics(void) {
+    FILE *font_file;
+    long file_size;
+
+    if (font_metrics_known) return;
+    font_metrics_known = true;
+
+    /* The repository may be built with the historical bundled font while CI
+     * generates the compact full-CJK font.  Do not apply compact-font scales
+     * to the historical asset: that is what turns every label into a huge,
+     * overlapping block on local emulator builds. */
+    font_file = fopen("romfs:/chinese.bcfnt", "rb");
+    if (!font_file) return;
+    if (fseek(font_file, 0, SEEK_END) == 0) {
+        file_size = ftell(font_file);
+        compact_font_metrics = file_size > (2L * 1024L * 1024L);
+    }
+    fclose(font_file);
+}
+
 static float readable_text_size(float size) {
-    float scaled = size >= UI_TEXT_LARGE_THRESHOLD
-        ? size * UI_TEXT_SCALE_LARGE
-        : size * UI_TEXT_SCALE_BODY;
-    return scaled < UI_TEXT_MIN_SCALE ? UI_TEXT_MIN_SCALE : scaled;
+    float scaled;
+
+    detect_font_metrics();
+    if (!compact_font_metrics) {
+        /* Historical 14px bundled font: retain the established UI scale. */
+        scaled = size >= UI_TEXT_LARGE_THRESHOLD
+            ? size * 1.08f
+            : size * 1.16f;
+        return scaled < 0.38f ? 0.38f : scaled;
+    }
+
+    /* Compact 8px full-CJK font: use fixed visual tiers rather than a blind
+     * 3x multiplier. This keeps captions around 9-10px and body text around
+     * 11-13px on the 3DS while allowing display titles to remain prominent. */
+    if (size < 0.32f) return UI_TEXT_MIN_SCALE;
+    if (size < 0.40f) return 1.25f;
+    if (size < 0.55f) return 1.45f;
+    if (size < 0.75f) return 1.70f;
+    if (size < 1.00f) return 2.05f;
+    return size * 2.15f;
 }
 
 /* Draw text using global buffer with active font.  Centralizing the readable
