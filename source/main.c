@@ -49,23 +49,30 @@
 
 /* Theme tokens.  They remain variables rather than preprocessor constants so
  * the user can switch the bundled light/dark skins without restarting. */
-static u32 CLR_BG_TOP     = C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF);
-static u32 CLR_BG_BOT     = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
-static u32 CLR_SURFACE    = C2D_Color32(0xFF, 0xFF, 0xFF, 0xFF);
-static u32 CLR_SURFACE_LT = C2D_Color32(0xF2, 0xF2, 0xF7, 0xFF);
-static u32 CLR_TEXT       = C2D_Color32(0x1C, 0x1C, 0x1E, 0xFF);
-static u32 CLR_TEXT_SEC   = C2D_Color32(0x48, 0x48, 0x4A, 0xFF);
-static u32 CLR_TEXT_DIM   = C2D_Color32(0x8E, 0x8E, 0x93, 0xFF);
-static u32 CLR_ACCENT     = C2D_Color32(0x00, 0x7A, 0xFF, 0xFF);
-static u32 CLR_ACCENT2    = C2D_Color32(0xAF, 0x52, 0xDE, 0xFF);
-static u32 CLR_ACCENT3    = C2D_Color32(0xFF, 0x3B, 0x30, 0xFF);
-static u32 CLR_OK         = C2D_Color32(0x34, 0xC7, 0x59, 0xFF);
-static u32 CLR_ERR        = C2D_Color32(0xFF, 0x3B, 0x30, 0xFF);
-static u32 CLR_WARN       = C2D_Color32(0xFF, 0x95, 0x00, 0xFF);
-static u32 CLR_INFO       = C2D_Color32(0x00, 0x7A, 0xFF, 0xFF);
-static u32 CLR_STATUSBAR  = C2D_Color32(0xE5, 0xE5, 0xEA, 0xFF);
+static u32 CLR_BG_TOP;
+static u32 CLR_BG_BOT;
+static u32 CLR_SURFACE;
+static u32 CLR_SURFACE_LT;
+static u32 CLR_TEXT;
+static u32 CLR_TEXT_SEC;
+static u32 CLR_TEXT_DIM;
+static u32 CLR_ACCENT;
+static u32 CLR_ACCENT2;
+static u32 CLR_ACCENT3;
+static u32 CLR_OK;
+static u32 CLR_ERR;
+static u32 CLR_WARN;
+static u32 CLR_INFO;
+static u32 CLR_STATUSBAR;
 
 static void apply_theme_palette(UiTheme theme) {
+    /* C2D_Color32 is an inline function in some devkitPro releases, so these
+     * runtime assignments intentionally avoid non-constant file initializers. */
+    CLR_ACCENT3 = C2D_Color32(0xFF, 0x3B, 0x30, 0xFF);
+    CLR_OK = C2D_Color32(0x34, 0xC7, 0x59, 0xFF);
+    CLR_ERR = C2D_Color32(0xFF, 0x3B, 0x30, 0xFF);
+    CLR_WARN = C2D_Color32(0xFF, 0x95, 0x00, 0xFF);
+    CLR_INFO = C2D_Color32(0x00, 0x7A, 0xFF, 0xFF);
     if (theme == UI_THEME_DARK) {
         CLR_BG_TOP = C2D_Color32(0x1B, 0x1C, 0x20, 0xFF);
         CLR_BG_BOT = C2D_Color32(0x10, 0x11, 0x14, 0xFF);
@@ -334,13 +341,6 @@ static void draw_selection(float x, float y, float w, float h) {
     /* ClouDS-style active rail: it makes focus readable even when the skin
      * texture is dimmed by the dark theme or by a small 3DS screen. */
     C2D_DrawRectSolid(x, y + 4.0f, 0.5f, 3.0f, h - 8.0f, CLR_ACCENT);
-}
-
-/* Draw a header/title bar */
-static void draw_header(float x, float y, float w, float h) {
-    float corner = aero_corner(h);
-    ui_skin_draw_nine_slice(&skin, UI_SKIN_HEADER,
-        x, y, 0.5f, w, h, 12U, corner);
 }
 
 /* Gradient bar (top to bottom) - no skin equivalent, keep raw */
