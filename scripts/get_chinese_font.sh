@@ -51,7 +51,8 @@ fi
 echo "Converting $FONT_FILE to BCFNT (32px)..."
 # Keep the bitmap source large enough for readable downscaled text on the
 # 3DS's 240p screens. The UI applies its own per-level C2D scale afterwards.
-mkbcfnt -o "$OUTPUT_FONT" -s 32 "$FONT_FILE" 2>&1
+python3 "$(dirname "$0")/generate_charlist.py"
+mkbcfnt -o "$OUTPUT_FONT" -s 32 -w "$ROMFS_DIR/../scripts/charlist.txt" "$FONT_FILE" 2>&1
 
 if [ -f "$OUTPUT_FONT" ]; then
     SIZE=$(stat -f%z "$OUTPUT_FONT" 2>/dev/null || stat -c%s "$OUTPUT_FONT" 2>/dev/null)
