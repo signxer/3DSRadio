@@ -1089,7 +1089,7 @@ static void render_playing(void) {
     /* Station info line */
     char info[128];
     if (strlen(app.current_station->country) > 0 && app.current_station->bitrate > 0) {
-        snprintf(info, sizeof(info), "%s  \xb7  %d kbps  \xb7  %s",
+        snprintf(info, sizeof(info), "%s  -  %d kbps  -  %s",
                  app.current_station->country, app.current_station->bitrate,
                  app.current_station->codec);
     } else if (strlen(app.current_station->country) > 0) {
@@ -1157,13 +1157,13 @@ static void render_playing(void) {
     clear_bottom();
     C2D_DrawRectSolid(0, 0, 0.1f, BOT_WIDTH, 4, CLR_ACCENT2);
     draw_label(14, 12, 0.34f, CLR_ACCENT, "%s", tr_controls());
-    draw_panel(10, 31, BOT_WIDTH - 20, 32);
-    draw_icon_radio(18, 37, 22, CLR_ACCENT);
+    draw_panel(10, 31, BOT_WIDTH - 20, 38);
+    draw_icon_radio(18, 38, 22, CLR_ACCENT);
     char mini_name[64];
     copy_utf8_ellipsis(mini_name, sizeof(mini_name),
                        app.current_station->name, 25);
-    draw_label(50, 37, 0.40f, CLR_TEXT, "%s", mini_name);
-    draw_label(50, 51, 0.28f, CLR_TEXT_DIM, "%s", state_label);
+    draw_label(50, 35, 0.40f, CLR_TEXT, "%s", mini_name);
+    draw_label(50, 52, 0.28f, CLR_TEXT_DIM, "%s", state_label);
 
     struct { const char *label; u32 color; } controls[] = {
         {tr_play_pause(), CLR_ACCENT}, {tr_stop_back(), CLR_ACCENT2},
@@ -1171,17 +1171,17 @@ static void render_playing(void) {
     };
     for (int i = 0; i < 4; i++) {
         int x = 8 + i * 78;
-        int y = 72;
+        int y = 70;
         bool selected = i == 0 && (player_state == STREAM_STATE_PLAYING ||
                                    player_state == STREAM_STATE_PAUSED);
-        draw_button(x, y, 72, 52, selected);
+        draw_button(x, y, 72, 58, selected);
         if (i == 0) {
-            if (player_state == STREAM_STATE_PLAYING) draw_icon_pause(x + 25, y + 7, 23, controls[i].color);
-            else draw_icon_play(x + 25, y + 7, 23, controls[i].color);
-        } else if (i == 1) draw_icon_stop(x + 25, y + 7, 23, controls[i].color);
-        else if (i == 2) draw_icon_volume(x + 24, y + 7, 24, controls[i].color);
-        else draw_icon_volume(x + 24, y + 7, 24, controls[i].color);
-        draw_label(x + 8, y + 34, 0.28f, controls[i].color, "%s", controls[i].label);
+            if (player_state == STREAM_STATE_PLAYING) draw_icon_pause(x + 25, y + 6, 23, controls[i].color);
+            else draw_icon_play(x + 25, y + 6, 23, controls[i].color);
+        } else if (i == 1) draw_icon_stop(x + 25, y + 6, 23, controls[i].color);
+        else if (i == 2) draw_icon_volume(x + 24, y + 6, 24, controls[i].color);
+        else draw_icon_volume(x + 24, y + 6, 24, controls[i].color);
+        draw_label(x + 8, y + 38, 0.28f, controls[i].color, "%s", controls[i].label);
     }
 
     /* Diagnostic panel is useful when a stream is weak or unsupported, but
@@ -1710,7 +1710,7 @@ static void handle_input(void) {
                     stream_player_set_volume(app.stream_player, app.volume);
                 set_status("%s", CLR_INFO, tr_volume_level((int)(app.volume * 100)));
             }
-            if (touch_active && touch.py >= 70 && touch.py <= 126) {
+            if (touch_active && touch.py >= 68 && touch.py <= 130) {
                 int idx = (touch.px - 8) / 78;
                 if (idx >= 0 && idx < 4) {
                     switch (idx) {

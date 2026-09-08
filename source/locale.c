@@ -288,9 +288,11 @@ const char *tr_internet_radio(void) {
 const char *tr_votes_clicks(int votes, int clicks) {
     static char buf[64];
     if (is_chinese()) {
-        snprintf(buf, sizeof(buf), "\x02 %d 票  \xb7  %d 次点击", votes, clicks);
+        /* Keep separators UTF-8/ASCII safe.  The old \x02 and raw 0xB7
+         * bytes were interpreted as missing glyphs by the bundled BCFNT. */
+        snprintf(buf, sizeof(buf), "* %d 票  -  %d 次点击", votes, clicks);
     } else {
-        snprintf(buf, sizeof(buf), "\x02 %d votes  \xb7  %d clicks", votes, clicks);
+        snprintf(buf, sizeof(buf), "* %d votes  -  %d clicks", votes, clicks);
     }
     return buf;
 }
