@@ -20,6 +20,9 @@ jobs:
 
       - name: Install dependencies
         run: |
+          export DEVKITPRO=/opt/devkitpro
+          export DEVKITARM=$DEVKITPRO/devkitARM
+          export PORTLIBS=$DEVKITPRO/portlibs/3ds
           # 3DS dev libraries are already installed in the image
           dkp-pacman -Sy --noconfirm 2>&1 | tail -3
           # FAAD2 is optional in devkitPro. Enable it when the portlib is
@@ -27,7 +30,24 @@ jobs:
           if dkp-pacman -S --noconfirm 3ds-libfaad2; then
             echo "FAAD2 AAC backend: installed"
           else
-            echo "FAAD2 AAC backend: unavailable (MP3/OGG remain enabled)"
+            echo "FAAD2 portlib is not packaged; building FAAD2 2.11.2 from source"
+            rm -rf /tmp/faad2-src /tmp/faad2-build
+            mkdir -p /tmp/faad2-src
+            curl -fsSL https://github.com/knik0/faad2/archive/refs/tags/2.11.2.tar.gz \
+              | tar -xz --strip-components=1 -C /tmp/faad2-src
+            cmake -S /tmp/faad2-src -B /tmp/faad2-build \
+              -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/cmake/3DS.cmake" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="$PORTLIBS" \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DFAAD_BUNDLED_MODE=OFF \
+              -DFAAD_BUILD_CLI=OFF \
+              -DFAAD_APPLY_DRC=OFF
+            cmake --build /tmp/faad2-build --target faad --parallel
+            cmake --install /tmp/faad2-build
+            test -f "$PORTLIBS/include/neaacdec.h"
+            test -f "$PORTLIBS/lib/libfaad.a"
+            echo "FAAD2 AAC backend: built from pinned source"
           fi
 
       - name: Generate placeholder assets

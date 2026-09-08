@@ -1086,6 +1086,7 @@ int stream_player_play_with_codec(StreamPlayer *p, const char *url,
 void stream_player_update(StreamPlayer *p) {
     /* Decoding now runs on a dedicated decode thread (see decode_thread_func).
      * This hook is kept for the main loop's frame cadence; nothing to do. */
+    (void)p;
 }
 
 void stream_player_toggle_pause(StreamPlayer *p) {
