@@ -113,6 +113,7 @@ cia: cia-tools $(TARGET).3dsx
 	@$(MAKEROM) -f cia -o $(TARGET).cia -rsf romfs/template.rsf \
 		-target t -exefslogo -elf $(TARGET).elf \
 		-icon romfs/icon.icn -banner romfs/banner.bnr \
+		-DAPP_ROMFS="$(CURDIR)/$(ROMFS)" \
 		-DAPP_TITLE="$(TITLE)" -DAPP_PRODUCT_CODE="$(PRODUCT_CODE)" \
 		-DAPP_UNIQUE_ID="$(UNIQUE_ID)"
 	@test -s "$(TARGET).cia"
