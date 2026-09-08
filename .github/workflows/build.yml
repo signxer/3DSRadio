@@ -143,11 +143,11 @@ jobs:
           curl -sSL -o "$FONT_FILE" "$FONT_URL"
           ls -la "$FONT_FILE"
 
-          echo "=== Building BCFNT font (12px Bold, full basic CJK) ==="
-          # A compact 12px source covers the full basic CJK block without
-          # exhausting 3DS texture/FCRAM. C2D enlarges it per UI text level.
+          echo "=== Building BCFNT font (8px Bold, full basic CJK) ==="
+          # An 8px source keeps the full basic CJK font within the 3DS
+          # texture/FCRAM budget. C2D enlarges it per UI text level.
           echo "Charlist: $(wc -w < scripts/charlist.txt) codepoints"
-          mkbcfnt -o romfs/chinese.bcfnt -s 12 \
+          mkbcfnt -o romfs/chinese.bcfnt -s 8 \
             -w scripts/charlist.txt "$FONT_FILE"
 
           ls -la romfs/chinese.bcfnt

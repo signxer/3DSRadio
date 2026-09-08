@@ -48,11 +48,11 @@ if [ -z "$FONT_FILE" ]; then
     exit 1
 fi
 
-echo "Converting $FONT_FILE to BCFNT (12px, full basic CJK)..."
+echo "Converting $FONT_FILE to BCFNT (8px, full basic CJK)..."
 # Keep the full basic CJK coverage compact enough for 3DS memory. The UI
 # applies a larger C2D scale so normal text remains readable on 240p screens.
 python3 "$(dirname "$0")/generate_charlist.py"
-mkbcfnt -o "$OUTPUT_FONT" -s 12 -w "$ROMFS_DIR/../scripts/charlist.txt" "$FONT_FILE" 2>&1
+mkbcfnt -o "$OUTPUT_FONT" -s 8 -w "$ROMFS_DIR/../scripts/charlist.txt" "$FONT_FILE" 2>&1
 
 if [ -f "$OUTPUT_FONT" ]; then
     SIZE=$(stat -f%z "$OUTPUT_FONT" 2>/dev/null || stat -c%s "$OUTPUT_FONT" 2>/dev/null)
