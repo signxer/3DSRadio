@@ -35,7 +35,7 @@ cd 3DSRadio
 # Build the 3DSX file
 make
 
-# Build the CIA file (optional, requires makerom/bannertool)
+# Build the CIA file (optional; bootstraps pinned makerom/bannertool)
 make cia
 ```
 
@@ -89,6 +89,23 @@ session to avoid repeating the same network request.
 - [stb_vorbis](https://github.com/nothings/stb) for the public-domain OGG/Vorbis decoder
 - [ClouDS-Music-FA](https://github.com/Epic0522/ClouDS-Music-FA) for the progressive playback, keyboard, candidate layout, and aero UI reference
 - See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for reused component and asset attribution
+
+## Build a CIA
+
+The normal CI build produces both a 3DSX and an installable CIA.  CIA
+packaging uses pinned host-side versions of `makerom` and `bannertool`, built
+on demand under the ignored `.tools/` directory, so it does not depend on
+whether the devkitPro package mirror currently exposes those tools.
+
+With devkitARM configured and the CI-generated banner assets present, run:
+
+```sh
+make cia
+```
+
+The CIA tools are optional for regular 3DSX builds.  If the host has no CMake,
+compiler, or network access, `make` and the 3DSX target remain independent;
+only `make cia` requires the native packaging-tool bootstrap.
 
 ## License
 

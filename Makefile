@@ -61,7 +61,15 @@ ifneq ($(strip $(DEVKITARM)),)
 
   VPATH         := $(CURDIR)/$(SOURCES):$(CURDIR)/$(DATA)
 
-  .PHONY: all clean cia
+  # CIA packaging tools are native host tools, not part of the devkitARM
+  # toolchain.  Keep them pinned and isolated from the system installation so
+  # local builds and CI use the same versions.
+  CIA_TOOLS_PLATFORM := $(shell uname -s)-$(shell uname -m)
+  CIA_TOOLS_BIN      := $(CURDIR)/.tools/cia-tools/$(CIA_TOOLS_PLATFORM)/bin
+  MAKEROM            ?= $(CIA_TOOLS_BIN)/makerom
+  BANNERTOOL         ?= $(CIA_TOOLS_BIN)/bannertool
+
+  .PHONY: all clean cia cia-tools
 
 #-------------------------------------------------------------------------------
 # Build rules
@@ -93,17 +101,22 @@ $(BUILD)/%.o: %.cpp
 #-------------------------------------------------------------------------------
 # CIA package
 #-------------------------------------------------------------------------------
-cia: $(TARGET).3dsx
+
+cia-tools:
+	@bash scripts/install_cia_tools.sh
+
+cia: cia-tools $(TARGET).3dsx
 	@echo "  building CIA..."
-	@bannertool makebanner -i romfs/banner.png -a romfs/banner.wav -o romfs/banner.bnr ; \
-	bannertool makesmdh -s "$(TITLE)" -l "$(DESCRIPTION)" -p "$(AUTHOR)" \
-		-i romfs/icon.png -o romfs/icon.icn ; \
-	makerom -f cia -o $(TARGET).cia -rsf romfs/template.rsf \
+	@$(BANNERTOOL) makebanner -i romfs/banner.png -a romfs/banner.wav -o romfs/banner.bnr
+	@$(BANNERTOOL) makesmdh -s "$(TITLE)" -l "$(DESCRIPTION)" -p "$(AUTHOR)" \
+		-i romfs/icon.png -o romfs/icon.icn
+	@$(MAKEROM) -f cia -o $(TARGET).cia -rsf romfs/template.rsf \
 		-target t -exefslogo -elf $(TARGET).elf \
 		-icon romfs/icon.icn -banner romfs/banner.bnr \
 		-DAPP_TITLE="$(TITLE)" -DAPP_PRODUCT_CODE="$(PRODUCT_CODE)" \
-		-DAPP_UNIQUE_ID="$(UNIQUE_ID)" ; \
-	echo "  CIA built: $(TARGET).cia"
+		-DAPP_UNIQUE_ID="$(UNIQUE_ID)"
+	@test -s "$(TARGET).cia"
+	@echo "  CIA built: $(TARGET).cia"
 
 clean:
 	@rm -rf $(BUILD) $(TARGET).3dsx $(TARGET).elf $(TARGET).smdh \

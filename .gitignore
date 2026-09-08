@@ -5,6 +5,7 @@ build/
 *.smdh
 *.cia
 *.map
+.tools/
 
 # CA certificates
 romfs/cacert.pem
