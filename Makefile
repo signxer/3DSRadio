@@ -8,7 +8,7 @@ AUTHOR         := 3DSRadio
 VERSION_MAJOR  := 1
 VERSION_MINOR  := 1
 VERSION_MICRO  := 0
-PRODUCT_CODE   := CTR-RADIO
+  PRODUCT_CODE   := CTR-H-3DRA
 UNIQUE_ID      := 0x7F500
 
 #-------------------------------------------------------------------------------
