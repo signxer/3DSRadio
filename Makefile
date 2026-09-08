@@ -60,7 +60,9 @@ ifneq ($(strip $(DEVKITARM)),)
   FAAD2_HEADER  := $(PORTLIBS)/include/neaacdec.h
   ifneq ($(wildcard $(FAAD2_HEADER)),)
     CFLAGS       += -DHAVE_FAAD2
-    LIBS         += -lfaad
+    # libfaad's static archive uses libm; keep -lm after it for archive
+    # ordering on the ARM linker.
+    LIBS         += -lfaad -lm
   endif
 
   # Source auto-discovery
