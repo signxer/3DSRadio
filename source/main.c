@@ -42,14 +42,11 @@
 #define MAX_STATIONS 100
 #define MAX_TAGS 50
 
-/* 3DS screens are small and are commonly viewed from a short distance.  Keep
- * typography deliberately bold and readable instead of letting tiny captions
- * consume the hierarchy.  Large display text gets a gentler multiplier so
- * that station names still fit the 400px top screen. */
-#define UI_TEXT_SCALE_BODY 3.00f
-#define UI_TEXT_SCALE_LARGE 2.75f
+/* 3DS screens are small.  These are input tiers, not pixels: the bundled
+ * BCFNT font has a different native cell size between local development and
+ * CI builds, so draw_label() normalises both assets below. */
 #define UI_TEXT_LARGE_THRESHOLD 0.75f
-#define UI_TEXT_MIN_SCALE 1.20f
+#define UI_TEXT_MIN_SCALE 0.24f
 
 /* ======================================================================
  * Apple-Light Color Palette
@@ -394,22 +391,24 @@ static float readable_text_size(float size) {
 
     detect_font_metrics();
     if (!compact_font_metrics) {
-        /* Historical 14px bundled font: retain the established UI scale. */
+        /* The checked-in development font is already a readable UI font.
+         * Earlier revisions multiplied it again, which made the title and
+         * two-line cards collide on the 320x240 lower screen. */
         scaled = size >= UI_TEXT_LARGE_THRESHOLD
-            ? size * 1.08f
-            : size * 1.16f;
-        return scaled < 0.38f ? 0.38f : scaled;
+            ? size * 0.82f
+            : size * 0.86f;
+        return scaled < UI_TEXT_MIN_SCALE ? UI_TEXT_MIN_SCALE : scaled;
     }
 
     /* Compact 8px full-CJK font: use fixed visual tiers rather than a blind
      * 3x multiplier. This keeps captions around 9-10px and body text around
      * 11-13px on the 3DS while allowing display titles to remain prominent. */
-    if (size < 0.32f) return UI_TEXT_MIN_SCALE;
-    if (size < 0.40f) return 1.25f;
-    if (size < 0.55f) return 1.45f;
-    if (size < 0.75f) return 1.70f;
-    if (size < 1.00f) return 2.05f;
-    return size * 2.15f;
+    if (size < 0.32f) return 0.85f;
+    if (size < 0.40f) return 0.95f;
+    if (size < 0.55f) return 1.10f;
+    if (size < 0.75f) return 1.30f;
+    if (size < 1.00f) return 1.55f;
+    return size * 1.70f;
 }
 
 /* Draw text using global buffer with active font.  Centralizing the readable
@@ -742,9 +741,12 @@ static void draw_top_brand(void) {
                           i == 3 ? CLR_ACCENT2 : CLR_ACCENT);
     }
     draw_icon_radio(160, 30, 80, CLR_ACCENT);
-    draw_label(20, 149, 1.15f, CLR_TEXT, "3DSRadio");
-    draw_label(22, 184, 0.43f, CLR_TEXT_SEC, "%s", tr_main_subtitle());
-    draw_label(22, 204, 0.32f, CLR_TEXT_DIM, "radio-browser.info  ·  v1.1");
+    /* Keep the three brand lines on a real baseline grid.  The BCFNT glyph
+     * box extends below the requested y coordinate, so a 35px step was not
+     * enough once CJK was enabled. */
+    draw_label(20, 139, 1.00f, CLR_TEXT, "3DSRadio");
+    draw_label(22, 180, 0.36f, CLR_TEXT_SEC, "%s", tr_main_subtitle());
+    draw_label(22, 204, 0.28f, CLR_TEXT_DIM, "radio-browser.info  ·  v1.1");
 }
 
 static void draw_current_station_hero(void) {
@@ -850,18 +852,18 @@ static void render_main_menu(void) {
         int col = i & 1;
         int row = i >> 1;
         float x = 10.0f + col * 152.0f;
-        float y = 72.0f + row * 53.0f;
+        float y = 70.0f + row * 57.0f;
         bool selected = app.selection == i;
-        draw_button(x, y, 144, 45, selected);
+        draw_button(x, y, 144, 51, selected);
         if (i == 0) draw_icon_list(x + 12, y + 9, 24, selected ? CLR_ACCENT : CLR_TEXT_SEC);
         if (i == 1) draw_icon_globe(x + 12, y + 9, 24, selected ? CLR_ACCENT : CLR_TEXT_SEC);
         if (i == 2) draw_icon_radio(x + 12, y + 9, 24, selected ? CLR_ACCENT : CLR_TEXT_SEC);
         if (i == 3) draw_icon_search(x + 12, y + 9, 24, selected ? CLR_ACCENT : CLR_TEXT_SEC);
-        draw_label(x + 44, y + 8, 0.35f,
+        draw_label(x + 44, y + 5, 0.30f,
                    selected ? CLR_TEXT : CLR_TEXT_SEC, "%s", subtitles[i]);
-        draw_label(x + 44, y + 24, 0.30f,
+        draw_label(x + 44, y + 28, 0.28f,
                    selected ? CLR_ACCENT : CLR_TEXT_DIM, "%s", labels[i]);
-        draw_icon_chevron(x + 126, y + 16, 11,
+        draw_icon_chevron(x + 126, y + 19, 11,
                           selected ? CLR_ACCENT2 : CLR_TEXT_DIM);
     }
     draw_footer_hints("A 打开", "L/R 切换页签");
@@ -1502,7 +1504,7 @@ static void handle_input(void) {
                 if (kDown & KEY_UP) app.selection = (app.selection + 3) % 4;
                 if (touch_active && touch.py >= 68 && touch.py < 180) {
                     int col = touch.px >= 160 ? 1 : 0;
-                    int row = touch.py >= 125 ? 1 : 0;
+                    int row = touch.py >= 127 ? 1 : 0;
                     app.selection = row * 2 + col;
                     activate = true;
                 }
