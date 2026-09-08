@@ -2,7 +2,7 @@
 """Build the BCFNT character list used by both CI and local builds.
 
 The radio API can return arbitrary UTF-8 station names.  GB2312 is not a
-complete Unicode Chinese set, so keep the full CJK Unified Ideographs BMP
+complete Unicode Chinese set, so keep the full basic CJK Unified Ideographs
 range in addition to characters found in the application and the previous
 curated list.
 """
@@ -27,7 +27,13 @@ def main():
         for token in CHARLIST.read_text(encoding="ascii").split():
             if token.lower().startswith("0x"):
                 try:
-                    codepoints.add(int(token, 16))
+                    cp = int(token, 16)
+                    # Rebuild all basic CJK coverage below rather than
+                    # retaining an accidentally oversized previous list.
+                    if not (0x3400 <= cp <= 0x4DBF or
+                            0x4E00 <= cp <= 0x9FFF or
+                            0xF900 <= cp <= 0xFAFF):
+                        codepoints.add(cp)
                 except ValueError:
                     pass
 
@@ -40,11 +46,9 @@ def main():
             add_text(codepoints, path.read_text(encoding="utf-8"))
 
     # CJK Unified Ideographs contains both simplified and traditional Chinese
-    # used by radio-browser station names.  It is intentionally BMP-only:
-    # BCFNT/Citro2D support and 3DS memory remain predictable.
+    # used by radio-browser station names.  Keep the basic block: it covers
+    # practically all station names while keeping a compact 3DS font.
     codepoints.update(range(0x4E00, 0xA000))
-    codepoints.update(range(0x3400, 0x4DC0))
-    codepoints.update(range(0xF900, 0xFB00))
 
     # Punctuation and full-width forms commonly returned alongside CJK text.
     codepoints.update(range(0x3000, 0x3040))

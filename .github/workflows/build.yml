@@ -143,11 +143,11 @@ jobs:
           curl -sSL -o "$FONT_FILE" "$FONT_URL"
           ls -la "$FONT_FILE"
 
-          echo "=== Building BCFNT font (32px Bold) ==="
-          # 32px Bold gives the UI more bitmap detail before C2D scales it
-          # down, which keeps Chinese glyphs readable on the 240p screens.
+          echo "=== Building BCFNT font (12px Bold, full basic CJK) ==="
+          # A compact 12px source covers the full basic CJK block without
+          # exhausting 3DS texture/FCRAM. C2D enlarges it per UI text level.
           echo "Charlist: $(wc -w < scripts/charlist.txt) codepoints"
-          mkbcfnt -o romfs/chinese.bcfnt -s 32 \
+          mkbcfnt -o romfs/chinese.bcfnt -s 12 \
             -w scripts/charlist.txt "$FONT_FILE"
 
           ls -la romfs/chinese.bcfnt

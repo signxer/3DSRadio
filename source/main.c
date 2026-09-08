@@ -46,10 +46,10 @@
  * typography deliberately bold and readable instead of letting tiny captions
  * consume the hierarchy.  Large display text gets a gentler multiplier so
  * that station names still fit the 400px top screen. */
-#define UI_TEXT_SCALE_BODY 1.16f
-#define UI_TEXT_SCALE_LARGE 1.08f
+#define UI_TEXT_SCALE_BODY 2.50f
+#define UI_TEXT_SCALE_LARGE 2.20f
 #define UI_TEXT_LARGE_THRESHOLD 0.75f
-#define UI_TEXT_MIN_SCALE 0.38f
+#define UI_TEXT_MIN_SCALE 0.90f
 
 /* ======================================================================
  * Apple-Light Color Palette
