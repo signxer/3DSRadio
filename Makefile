@@ -55,6 +55,14 @@ ifneq ($(strip $(DEVKITARM)),)
   LIBDIRS       := $(CTRULIB) $(PORTLIBS)
   LDFLAGS       += $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
+  # FAAD2 is optional. A stock devkitPro image keeps the MP3/OGG player
+  # buildable; installations with the GPL libfaad2 port get AAC support.
+  FAAD2_HEADER  := $(PORTLIBS)/include/neaacdec.h
+  ifneq ($(wildcard $(FAAD2_HEADER)),)
+    CFLAGS       += -DHAVE_FAAD2
+    LIBS         += -lfaad
+  endif
+
   # Source auto-discovery
   OFILES        := $(patsubst $(SOURCES)/%.c,%.o,$(wildcard $(SOURCES)/*.c))
   OFILES        += $(patsubst $(SOURCES)/%.cpp,%.o,$(wildcard $(SOURCES)/*.cpp))

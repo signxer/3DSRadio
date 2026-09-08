@@ -8,6 +8,7 @@
 #include <curl/curl.h>
 
 #include "ogg_decoder.h"
+#include "aac_decoder.h"
 
 /* minimp3 decoder - single header library */
 #define MINIMP3_IMPLEMENTATION
@@ -90,6 +91,7 @@ struct StreamPlayer {
     /* Decoder */
     mp3dec_t mp3d;
     OggDecoder oggd;
+    AacDecoder aacd;
     bool decoder_initialized;
     unsigned int decoder_no_progress;
 
@@ -139,17 +141,57 @@ static size_t ring_free(const StreamPlayer *p) {
     return p->download_buf_size - ring_available(p) - 1;
 }
 
+static char ascii_lower(char c) {
+    return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
+}
+
+static bool contains_ci(const char *text, const char *needle) {
+    if (!text || !needle || !needle[0]) return false;
+    for (const char *p = text; *p; p++) {
+        const char *a = p;
+        const char *b = needle;
+        while (*a && *b && ascii_lower(*a) == ascii_lower(*b)) {
+            a++;
+            b++;
+        }
+        if (!*b) return true;
+    }
+    return false;
+}
+
+static bool codec_hint_is_auto(const char *codec) {
+    return !codec || !codec[0] || contains_ci(codec, "unknown") ||
+           contains_ci(codec, "auto") || contains_ci(codec, "undefined");
+}
+
 static StreamCodec codec_from_string(const char *codec) {
-    if (!codec || !codec[0] || strcasecmp(codec, "MP3") == 0 ||
-        strcasecmp(codec, "MPEG") == 0 || strcasecmp(codec, "MPEG AUDIO") == 0)
+    if (codec_hint_is_auto(codec)) return STREAM_CODEC_UNKNOWN;
+    /* Radio-Browser may report values such as AAC+,H.264. Treat the audio
+     * part as authoritative and let the player reject genuinely unsupported
+     * formats instead of rejecting every compound value. */
+    if (contains_ci(codec, "mp3") || contains_ci(codec, "mpeg"))
         return STREAM_CODEC_MP3;
-    if (strcasecmp(codec, "OGG") == 0 || strcasecmp(codec, "VORBIS") == 0 ||
-        strcasecmp(codec, "OGG VORBIS") == 0)
+    if (contains_ci(codec, "ogg") || contains_ci(codec, "vorbis"))
         return STREAM_CODEC_OGG;
-    if (strcasecmp(codec, "AAC") == 0 || strcasecmp(codec, "AAC+") == 0 ||
-        strcasecmp(codec, "HE-AAC") == 0)
+    if (contains_ci(codec, "aac") || contains_ci(codec, "mp4a"))
         return STREAM_CODEC_AAC;
     return STREAM_CODEC_UNKNOWN;
+}
+
+static StreamCodec codec_from_url(const char *url) {
+    if (contains_ci(url, ".ogg") || contains_ci(url, ".oga"))
+        return STREAM_CODEC_OGG;
+    if (contains_ci(url, ".aac") || contains_ci(url, "aacp") ||
+        contains_ci(url, ".m4a") || contains_ci(url, "mp4a"))
+        return STREAM_CODEC_AAC;
+    if (contains_ci(url, ".mp3") || contains_ci(url, ".mpeg"))
+        return STREAM_CODEC_MP3;
+    return STREAM_CODEC_UNKNOWN;
+}
+
+static bool looks_like_adts(const uint8_t *data, size_t length) {
+    return data && length >= 2 && data[0] == 0xff &&
+           (data[1] & 0xf6) == 0xf0;
 }
 
 static void set_player_error(StreamPlayer *p, const char *message) {
@@ -178,6 +220,16 @@ static size_t stream_header_cb(char *buffer, size_t size, size_t nitems,
     size_t copy = length < sizeof(header) - 1 ? length : sizeof(header) - 1;
     memcpy(header, buffer, copy);
     header[copy] = '\0';
+    if (copy > 13 && strncasecmp(header, "content-type:", 13) == 0 &&
+        ctx->player->codec == STREAM_CODEC_UNKNOWN) {
+        const char *type = header + 13;
+        if (contains_ci(type, "aac") || contains_ci(type, "mp4"))
+            ctx->player->codec = STREAM_CODEC_AAC;
+        else if (contains_ci(type, "ogg") || contains_ci(type, "vorbis"))
+            ctx->player->codec = STREAM_CODEC_OGG;
+        else if (contains_ci(type, "mpeg") || contains_ci(type, "mp3"))
+            ctx->player->codec = STREAM_CODEC_MP3;
+    }
     if (copy > strlen(prefix) && strncasecmp(header, prefix, strlen(prefix)) == 0) {
         unsigned long value = strtoul(header + strlen(prefix), NULL, 10);
         if (value > 0 && value < 1024 * 1024) {
@@ -502,6 +554,82 @@ static void decode_pass_ogg(StreamPlayer *p) {
     }
 }
 
+static void decode_pass_aac(StreamPlayer *p) {
+    size_t *stage_len = &p->stage_len;
+    size_t *stage_off = &p->stage_off;
+
+    if (p->state == STREAM_STATE_BUFFERING &&
+        ring_available(p) + (*stage_len - *stage_off) < p->prebuffer_bytes &&
+        !p->mp3_eof) {
+        p->buffering = true;
+        return;
+    }
+
+    ring_to_stage(p);
+    for (int i = 0; i < p->num_wave_bufs; i++) {
+        ndspWaveBuf *buf = &p->wave_bufs[i];
+        if (buf->status != NDSP_WBUF_DONE && buf->status != NDSP_WBUF_FREE)
+            continue;
+
+        int16_t *out = p->pcm_data[i];
+        int total_samples = 0;
+        int max_samples = p->pcm_buf_samples * 2;
+        while (total_samples < max_samples) {
+            if (*stage_len - *stage_off < 4096) ring_to_stage(p);
+            if (*stage_len - *stage_off == 0) break;
+
+            size_t used = 0;
+            int samples = aac_decoder_decode(
+                &p->aacd, p->stage + *stage_off,
+                *stage_len - *stage_off, &used,
+                out + total_samples, max_samples - total_samples);
+            *stage_off += used;
+            total_samples += samples;
+
+            if (samples > 0) {
+                int previous_channels = p->active_channels;
+                int previous_rate = p->sample_rate;
+                int channels = p->aacd.channels;
+                if (channels < 1) channels = 2;
+                if (channels > 2) channels = 2;
+                p->active_channels = channels;
+                if (p->aacd.sample_rate > 0)
+                    p->sample_rate = p->aacd.sample_rate;
+                if (!p->decoder_initialized ||
+                    p->sample_rate != previous_rate ||
+                    p->active_channels != previous_channels) {
+                    p->decoder_initialized = true;
+                    configure_ndsp_channel(p);
+                }
+            } else if (used == 0) {
+                break;
+            }
+        }
+
+        if (total_samples > 0) {
+            p->decoder_no_progress = 0;
+            submit_wave_buffer(buf, out, total_samples, p->active_channels);
+            p->buffering = false;
+            if (p->state == STREAM_STATE_BUFFERING ||
+                p->state == STREAM_STATE_RECONNECTING)
+                p->state = STREAM_STATE_PLAYING;
+        } else if (p->mp3_eof && ring_available(p) == 0 &&
+                   *stage_len - *stage_off == 0) {
+            p->playing = false;
+            if (p->state != STREAM_STATE_ERROR) p->state = STREAM_STATE_ENDED;
+        } else {
+            if (*stage_len - *stage_off > 16384 && ++p->decoder_no_progress > 120) {
+                set_player_error(p, "Unsupported or invalid AAC stream");
+                return;
+            }
+            p->buffering = true;
+            if (p->state != STREAM_STATE_ERROR &&
+                p->state != STREAM_STATE_RECONNECTING)
+                p->state = STREAM_STATE_BUFFERING;
+        }
+    }
+}
+
 /* ======================================================================
  * One decode pass: refill every finished wave buffer from the MP3 staging
  * buffer. Runs on the decode thread, independent of the render loop.
@@ -510,6 +638,14 @@ static void decode_pass_ogg(StreamPlayer *p) {
 static void decode_pass(StreamPlayer *p) {
     if (p->codec == STREAM_CODEC_OGG) {
         decode_pass_ogg(p);
+        return;
+    }
+    if (p->codec == STREAM_CODEC_AAC) {
+        if (!aac_decoder_available()) {
+            set_player_error(p, "AAC decoder is not included in this build");
+            return;
+        }
+        decode_pass_aac(p);
         return;
     }
     size_t *stage_len = &p->stage_len;
@@ -530,7 +666,7 @@ static void decode_pass(StreamPlayer *p) {
     /* Some directory entries report a generic codec or a stale MP3 label.
      * Recognize an Ogg page before handing bytes to minimp3 so the stream
      * does not enter a misleading silent state. */
-    if (p->codec == STREAM_CODEC_MP3 &&
+    if ((p->codec == STREAM_CODEC_MP3 || p->codec == STREAM_CODEC_UNKNOWN) &&
         *stage_len - *stage_off >= 4 &&
         memcmp(p->stage + *stage_off, "OggS", 4) == 0) {
         p->codec = STREAM_CODEC_OGG;
@@ -543,13 +679,25 @@ static void decode_pass(StreamPlayer *p) {
 
     /* ADTS AAC has a distinctive sync/header pattern.  Fail early with a
      * useful diagnostic when the station metadata was incomplete. */
-    if (p->codec == STREAM_CODEC_MP3 &&
-        *stage_len - *stage_off >= 2 &&
-        p->stage[*stage_off] == 0xff &&
-        (p->stage[*stage_off + 1] & 0xf6) == 0xf0) {
-        set_player_error(p, "AAC stream is not enabled in this build");
+    if ((p->codec == STREAM_CODEC_MP3 || p->codec == STREAM_CODEC_UNKNOWN) &&
+        looks_like_adts(p->stage + *stage_off, *stage_len - *stage_off)) {
+        if (!aac_decoder_available()) {
+            set_player_error(p, "AAC decoder is not included in this build");
+            return;
+        }
+        p->codec = STREAM_CODEC_AAC;
+        aac_decoder_close(&p->aacd);
+        aac_decoder_init(&p->aacd);
+        p->decoder_initialized = false;
+        decode_pass_aac(p);
         return;
     }
+
+    /* No OggS/ADTS signature means the directory's AUTO entry is most
+     * likely an MPEG audio stream. Commit that decision once enough bytes
+     * have arrived so the UI can report the detected format. */
+    if (p->codec == STREAM_CODEC_UNKNOWN)
+        p->codec = STREAM_CODEC_MP3;
 
     /* Refill every wave buffer that has finished playing */
     for (int i = 0; i < p->num_wave_bufs; i++) {
@@ -720,6 +868,7 @@ StreamPlayer *stream_player_create_with_bufsize(StreamBufSize bufsize) {
     /* Initialize MP3 decoder */
     mp3dec_init(&p->mp3d);
     ogg_decoder_init(&p->oggd);
+    aac_decoder_init(&p->aacd);
 
     p->volume = 0.8f;
     p->active_channels = 2;
@@ -744,11 +893,15 @@ int stream_player_play_with_codec(StreamPlayer *p, const char *url,
     if (!p || !url || !url[0]) return -1;
 
     codec = codec_from_string(codec_name);
-    if ((!codec_name || !codec_name[0]) &&
-        (strstr(url, ".ogg") || strstr(url, ".oga")))
-        codec = STREAM_CODEC_OGG;
-    if (codec != STREAM_CODEC_MP3 && codec != STREAM_CODEC_OGG) {
-        set_player_error(p, "Unsupported stream codec (MP3 or OGG required)");
+    if (codec == STREAM_CODEC_UNKNOWN && codec_hint_is_auto(codec_name))
+        codec = codec_from_url(url);
+    if (codec == STREAM_CODEC_UNKNOWN && !codec_hint_is_auto(codec_name)) {
+        set_player_error(p, "Unsupported stream codec");
+        p->codec = codec;
+        return -2;
+    }
+    if (codec == STREAM_CODEC_AAC && !aac_decoder_available()) {
+        set_player_error(p, "AAC support requires the FAAD2 backend");
         p->codec = codec;
         return -2;
     }
@@ -808,6 +961,8 @@ int stream_player_play_with_codec(StreamPlayer *p, const char *url,
      * state from the previous stream, causing audio artifacts. */
     mp3dec_init(&p->mp3d);
     ogg_decoder_close(&p->oggd);
+    aac_decoder_close(&p->aacd);
+    aac_decoder_init(&p->aacd);
 
     /* Reset the decode staging buffer for the new stream */
     p->stage_len = 0;
@@ -1008,6 +1163,7 @@ void stream_player_destroy(StreamPlayer *p) {
     }
 
     ogg_decoder_close(&p->oggd);
+    aac_decoder_close(&p->aacd);
     ndspExit();
 
     for (int i = 0; i < p->num_wave_bufs; i++) {
@@ -1087,5 +1243,7 @@ int stream_player_get_buffer_percent(StreamPlayer *p) {
 
 bool stream_player_codec_supported(const char *codec) {
     StreamCodec type = codec_from_string(codec);
+    if (codec_hint_is_auto(codec)) return true;
+    if (type == STREAM_CODEC_AAC) return aac_decoder_available();
     return type == STREAM_CODEC_MP3 || type == STREAM_CODEC_OGG;
 }

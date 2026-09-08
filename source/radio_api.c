@@ -44,6 +44,43 @@ static bool initialized = false;
 static volatile NetCancelFn s_cancel_fn = NULL;
 static void *s_cancel_data = NULL;
 
+static char ascii_lower(char c) {
+    return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
+}
+
+static bool contains_ci(const char *text, const char *needle) {
+    if (!text || !needle || !needle[0]) return false;
+    for (const char *p = text; *p; p++) {
+        const char *a = p;
+        const char *b = needle;
+        while (*a && *b && ascii_lower(*a) == ascii_lower(*b)) {
+            a++;
+            b++;
+        }
+        if (!*b) return true;
+    }
+    return false;
+}
+
+/* Radio-Browser's codec field is the result of its last probe and can be
+ * empty/UNKNOWN while the stream URL still reveals the actual container. Do
+ * not label these stations unsupported: normalize them to AUTO so the
+ * player can continue with headers and byte-level probing. */
+static void normalize_station_codec(RadioStation *station) {
+    const char *url;
+    if (!station) return;
+    if (station->codec[0] && !contains_ci(station->codec, "unknown")) return;
+
+    url = station->url_resolved[0] ? station->url_resolved : station->url;
+    if (contains_ci(url, ".ogg") || contains_ci(url, ".oga"))
+        snprintf(station->codec, sizeof(station->codec), "OGG");
+    else if (contains_ci(url, ".aac") || contains_ci(url, "aacp") ||
+             contains_ci(url, ".m4a") || contains_ci(url, "mp4a"))
+        snprintf(station->codec, sizeof(station->codec), "AAC");
+    else
+        snprintf(station->codec, sizeof(station->codec), "AUTO");
+}
+
 void radio_set_cancel_hook(NetCancelFn fn, void *data) {
     s_cancel_fn = fn;
     s_cancel_data = data;
@@ -225,6 +262,8 @@ static bool parse_station(const JsonDoc *doc, RadioStation *station) {
         int64_t val;
         if (json_i64(doc, tok, &val) == 0) station->clicktrend = (int)val;
     }
+
+    normalize_station_codec(station);
 
     return true;
 }

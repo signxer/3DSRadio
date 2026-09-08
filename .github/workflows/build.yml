@@ -22,6 +22,13 @@ jobs:
         run: |
           # 3DS dev libraries are already installed in the image
           dkp-pacman -Sy --noconfirm 2>&1 | tail -3
+          # FAAD2 is optional in devkitPro. Enable it when the portlib is
+          # available, without making MP3/OGG-only images fail to build.
+          if dkp-pacman -S --noconfirm 3ds-libfaad2; then
+            echo "FAAD2 AAC backend: installed"
+          else
+            echo "FAAD2 AAC backend: unavailable (MP3/OGG remain enabled)"
+          fi
 
       - name: Generate placeholder assets
         run: |

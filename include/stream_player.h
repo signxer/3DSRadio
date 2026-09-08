@@ -6,7 +6,7 @@
 
 /* ======================================================================
  * Streaming Audio Player for 3DSRadio
- * Uses minimp3 decoder + ndsp hardware audio
+ * Uses minimp3, stb_vorbis and an optional FAAD2 backend + ndsp audio
  * ====================================================================== */
 
 /* Opaque player handle */
@@ -48,8 +48,8 @@ StreamPlayer *stream_player_create(void);
 /* Start playing a stream URL. Returns 0 on success. */
 int stream_player_play(StreamPlayer *player, const char *url);
 
-/* Start a stream with the codec reported by radio-browser.  Empty codec
- * names are sniffed as MP3 for backwards compatibility. */
+/* Start a stream with the codec reported by radio-browser. Empty, AUTO and
+ * UNKNOWN codec names are probed from the URL, headers and stream bytes. */
 int stream_player_play_with_codec(StreamPlayer *player, const char *url,
                                   const char *codec);
 

@@ -17,7 +17,7 @@
 #define RADIO_MAX_TAG 64
 #define RADIO_MAX_COUNTRY 64
 #define RADIO_MAX_LANGUAGE 32
-#define RADIO_MAX_CODE 16
+#define RADIO_MAX_CODE 32
 #define RADIO_API_BASE "http://de1.api.radio-browser.info"
 
 /* A single radio station */
@@ -33,7 +33,7 @@ typedef struct {
     char countrycode[RADIO_MAX_CODE];
     char state[RADIO_MAX_COUNTRY];
     char language[RADIO_MAX_LANGUAGE];
-    char codec[16];          /* MP3, AAC, etc. */
+    char codec[RADIO_MAX_CODE]; /* MP3, AAC+, AAC+,H.264, UNKNOWN, ... */
     int bitrate;             /* kbps */
     int votes;
     int clickcount;

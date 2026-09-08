@@ -15,6 +15,8 @@ A native homebrew internet radio client for the Nintendo 3DS, powered by [radio-
   touch/D-pad parity
 - Touch search keyboard with QWERTY/symbol layouts and a paged Chinese pinyin candidate set
 - MP3 and OGG/Vorbis playback with prebuffering, ICY stripping, and retry
+- Automatic stream probing for stale/unknown Radio-Browser codec labels
+- Optional AAC/AAC+ playback through the GPL FAAD2 port when available
 
 ## Prerequisites
 
@@ -23,6 +25,10 @@ A native homebrew internet radio client for the Nintendo 3DS, powered by [radio-
   ```
   sudo dkp-pacman -S 3ds-dev 3ds-libcurl 3ds-mbedtls 3ds-libpng 3ds-libjpeg-turbo
   ```
+
+AAC is enabled automatically when the devkitPro environment provides
+`neaacdec.h` and `libfaad`. The AAC dependency is optional; MP3 and OGG still
+build without it.
 
 ## Building
 
@@ -64,7 +70,7 @@ make cia
 - **Libraries:** citro2d, citro3d, libcurl, mbedtls, ctru
 - **API:** radio-browser.info (open, free)
 - **Audio:** ndsp (hardware audio)
-- **Audio formats:** MP3 (minimp3), OGG/Vorbis (stb_vorbis); AAC is reported as unsupported unless an AAC backend is added to the toolchain
+- **Audio formats:** MP3 (minimp3), OGG/Vorbis (stb_vorbis), and optional ADTS AAC/AAC+ (FAAD2)
 - **Buffering:** dedicated download/decode threads, prebuffer hysteresis, ICY metadata stripping, and six-wave weak-Wi-Fi preset
 - **Format:** 3DSX / CIA
 
@@ -74,9 +80,14 @@ The player waits for a small prebuffer before starting and automatically retries
 transient stream failures up to three times. The Settings screen can switch
 between small, medium, and large buffers; use the large buffer on unstable WiFi.
 
-Radio-browser lists stations in many formats. MP3 and OGG/Vorbis are playable in
-the current build. AAC stations remain visible with an explicit unsupported
-badge instead of entering a silent playback state.
+Radio-Browser's `codec` value is a last-check hint and may be empty or
+`UNKNOWN`, especially for older Chinese-language entries. Those stations are
+shown as `AUTO`: the player checks the resolved URL, response `Content-Type`,
+and the first audio bytes before selecting MP3, OGG/Vorbis, or ADTS AAC. This
+prevents a stale directory label from creating a silent playback screen.
+
+If FAAD2 is not present, AAC stations remain visible but show a clear
+unsupported message; MP3 and OGG are unaffected.
 
 Preferences are saved to `sdmc:/3ds/3DSRadio/settings.cfg` when the Settings
 screen is changed.
@@ -89,6 +100,7 @@ session to avoid repeating the same network request.
 - [radio-browser.info](https://www.radio-browser.info/) for the station database API
 - [devkitPro](https://devkitpro.org/) for the 3DS homebrew toolchain
 - [stb_vorbis](https://github.com/nothings/stb) for the public-domain OGG/Vorbis decoder
+- [FAAD2](https://github.com/knik0/faad2) for the optional GPL AAC decoder
 - [ClouDS-Music-FA](https://github.com/Epic0522/ClouDS-Music-FA) for the progressive playback, keyboard, candidate layout, and aero UI reference
 - See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for reused component and asset attribution
 
@@ -111,4 +123,6 @@ only `make cia` requires the native packaging-tool bootstrap.
 
 ## License
 
-MIT
+The application code is MIT. When the optional FAAD2 backend is linked into a
+distributed binary, FAAD2's GPL-2.0-or-later terms also apply to that binary;
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
