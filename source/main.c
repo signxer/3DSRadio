@@ -46,7 +46,7 @@
  * BCFNT font has a different native cell size between local development and
  * CI builds, so draw_label() normalises both assets below. */
 #define UI_TEXT_LARGE_THRESHOLD 0.75f
-#define UI_TEXT_MIN_SCALE 0.24f
+#define UI_TEXT_MIN_SCALE 0.20f
 
 /* ======================================================================
  * Apple-Light Color Palette
@@ -395,20 +395,20 @@ static float readable_text_size(float size) {
          * Earlier revisions multiplied it again, which made the title and
          * two-line cards collide on the 320x240 lower screen. */
         scaled = size >= UI_TEXT_LARGE_THRESHOLD
-            ? size * 0.82f
-            : size * 0.86f;
+            ? size * 0.68f
+            : size * 0.72f;
         return scaled < UI_TEXT_MIN_SCALE ? UI_TEXT_MIN_SCALE : scaled;
     }
 
     /* Compact 8px full-CJK font: use fixed visual tiers rather than a blind
-     * 3x multiplier. This keeps captions around 9-10px and body text around
-     * 11-13px on the 3DS while allowing display titles to remain prominent. */
-    if (size < 0.32f) return 0.85f;
-    if (size < 0.40f) return 0.95f;
-    if (size < 0.55f) return 1.10f;
-    if (size < 0.75f) return 1.30f;
-    if (size < 1.00f) return 1.55f;
-    return size * 1.70f;
+     * 3x multiplier. This keeps captions compact and body text readable on
+     * the 3DS while allowing display titles to remain prominent. */
+    if (size < 0.32f) return 0.78f;
+    if (size < 0.40f) return 0.86f;
+    if (size < 0.55f) return 1.00f;
+    if (size < 0.75f) return 1.18f;
+    if (size < 1.00f) return 1.38f;
+    return size * 1.50f;
 }
 
 /* Draw text using global buffer with active font.  Centralizing the readable
