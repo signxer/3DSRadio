@@ -192,11 +192,11 @@ jobs:
           curl -sSL -o "$FONT_FILE" "$FONT_URL"
           ls -la "$FONT_FILE"
 
-          echo "=== Building BCFNT font (28px Bold) ==="
-          # 28px Bold on 240p (~132 PPI) gives ~11.7% screen height.
-          # Even 0.5f scale text renders at ~14px — legible for CJK.
+          echo "=== Building BCFNT font (32px Bold) ==="
+          # 32px Bold gives the UI more bitmap detail before C2D scales it
+          # down, which keeps Chinese glyphs readable on the 240p screens.
           echo "Charlist: $(wc -w < scripts/charlist.txt) codepoints"
-          mkbcfnt -o romfs/chinese.bcfnt -s 28 \
+          mkbcfnt -o romfs/chinese.bcfnt -s 32 \
             -w scripts/charlist.txt "$FONT_FILE"
 
           ls -la romfs/chinese.bcfnt

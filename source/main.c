@@ -42,6 +42,15 @@
 #define MAX_STATIONS 100
 #define MAX_TAGS 50
 
+/* 3DS screens are small and are commonly viewed from a short distance.  Keep
+ * typography deliberately bold and readable instead of letting tiny captions
+ * consume the hierarchy.  Large display text gets a gentler multiplier so
+ * that station names still fit the 400px top screen. */
+#define UI_TEXT_SCALE_BODY 1.16f
+#define UI_TEXT_SCALE_LARGE 1.08f
+#define UI_TEXT_LARGE_THRESHOLD 0.75f
+#define UI_TEXT_MIN_SCALE 0.38f
+
 /* ======================================================================
  * Apple-Light Color Palette
  * Inspired by iOS system colors — dark text on light for 3DS readability.
@@ -358,7 +367,16 @@ static void draw_gradient(float x, float y, float w, float h,
     }
 }
 
-/* Draw text using global buffer with active font */
+static float readable_text_size(float size) {
+    float scaled = size >= UI_TEXT_LARGE_THRESHOLD
+        ? size * UI_TEXT_SCALE_LARGE
+        : size * UI_TEXT_SCALE_BODY;
+    return scaled < UI_TEXT_MIN_SCALE ? UI_TEXT_MIN_SCALE : scaled;
+}
+
+/* Draw text using global buffer with active font.  Centralizing the readable
+ * size here keeps every screen consistent, including transient status text
+ * and controls that used to be nearly invisible on the lower screen. */
 static void draw_label(float x, float y, float size, u32 color,
                        const char *fmt, ...) {
     char buf[256];
@@ -381,6 +399,7 @@ static void draw_label(float x, float y, float size, u32 color,
      * test — LARGER z passes, smaller z is rejected. Render order
      * (bg → glow → accent → text) controls layering. Never use
      * z != 0.5f without checking depth test direction. */
+    size = readable_text_size(size);
     C2D_DrawText(&c2d_text, C2D_WithColor, x, y, 0.5f, size, size, color);
 }
 
@@ -593,7 +612,7 @@ static void draw_status_bar(void) {
         c = (c & 0xFFFFFF00) | a;
         char status[80];
         copy_utf8_ellipsis(status, sizeof(status), app.status_text, 28);
-        float tw = (float)utf8_display_columns(status) * 7.0f;
+        float tw = (float)utf8_display_columns(status) * 8.0f;
         draw_label((TOP_WIDTH - tw) / 2.0f, TOP_HEIGHT - 21, 0.5f, c,
                    "%s", status);
     } else {
@@ -646,7 +665,7 @@ static void draw_app_nav(void) {
     const int widths[] = {68, 80, 62};
     for (int i = 0; i < 3; i++) {
         bool active = app.main_tab == i;
-        float text_width = (float)utf8_display_columns(tabs[i]) * 6.0f;
+        float text_width = (float)utf8_display_columns(tabs[i]) * 8.0f;
         draw_label(starts[i] + (widths[i] - text_width) * 0.5f, 7,
                    0.34f, active ? CLR_TEXT : CLR_TEXT_DIM, "%s", tabs[i]);
         if (active)
@@ -685,9 +704,9 @@ static void draw_top_brand(void) {
                           i == 3 ? CLR_ACCENT2 : CLR_ACCENT);
     }
     draw_icon_radio(160, 30, 80, CLR_ACCENT);
-    draw_label(20, 156, 1.15f, CLR_TEXT, "3DSRadio");
-    draw_label(22, 186, 0.43f, CLR_TEXT_SEC, "%s", tr_main_subtitle());
-    draw_label(22, 207, 0.32f, CLR_TEXT_DIM, "radio-browser.info  ·  v1.1");
+    draw_label(20, 149, 1.15f, CLR_TEXT, "3DSRadio");
+    draw_label(22, 184, 0.43f, CLR_TEXT_SEC, "%s", tr_main_subtitle());
+    draw_label(22, 204, 0.32f, CLR_TEXT_DIM, "radio-browser.info  ·  v1.1");
 }
 
 static void draw_current_station_hero(void) {
@@ -699,7 +718,7 @@ static void draw_current_station_hero(void) {
     draw_icon_radio(28, 34, 74, CLR_ACCENT);
     draw_label(122, 40, 0.35f, CLR_ACCENT2, "%s", tr_now_playing());
     char station[96];
-    copy_utf8_ellipsis(station, sizeof(station), app.current_station->name, 30);
+    copy_utf8_ellipsis(station, sizeof(station), app.current_station->name, 22);
     draw_label(122, 62, 0.88f, CLR_TEXT, "%s", station);
     char details[120];
     snprintf(details, sizeof(details), "%s  ·  %d kbps",
@@ -1001,7 +1020,7 @@ static void render_playing(void) {
     /* Large station name at top, clipped on UTF-8 boundaries. */
     char station_title[80];
     copy_utf8_ellipsis(station_title, sizeof(station_title),
-                       app.current_station->name, 38);
+                       app.current_station->name, 24);
     draw_label(20, 30, 1.2f, CLR_TEXT, "%s", station_title);
 
     /* Tags as chips using skin button */
