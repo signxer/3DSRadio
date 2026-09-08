@@ -43,7 +43,9 @@ jobs:
               -DFAAD_BUNDLED_MODE=OFF \
               -DFAAD_BUILD_CLI=OFF \
               -DFAAD_APPLY_DRC=OFF
-            cmake --build /tmp/faad2-build --target faad --parallel
+            # The upstream install script includes the DRM variant too, so
+            # build all static decoder targets before installing.
+            cmake --build /tmp/faad2-build --parallel
             cmake --install /tmp/faad2-build
             test -f "$PORTLIBS/include/neaacdec.h"
             test -f "$PORTLIBS/lib/libfaad.a"
